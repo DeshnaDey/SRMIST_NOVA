@@ -77,6 +77,7 @@ class BaselineEncoder(_AbsEncoder):  # type: ignore[misc,valid-type]
     def encode(
         self,
         inputs: Any,
+        *,
         task_metadata: Any = None,
         hf_split: str | None = None,
         hf_subset: str | None = None,
@@ -85,10 +86,17 @@ class BaselineEncoder(_AbsEncoder):  # type: ignore[misc,valid-type]
     ) -> np.ndarray:
         """Embed a batch of inputs.
 
-        Implements the MTEB v2 ``EncoderProtocol``::
+        Implements the MTEB v2 ``EncoderProtocol``. VERIFIED against mteb
+        2.20.11, where ``AbsEncoder.encode`` is the one abstract method::
 
-            encode(inputs: DataLoader[BatchedInput], task_metadata, hf_split,
-                   hf_subset, prompt_type=None, **kwargs) -> Array
+            encode(self, inputs: DataLoader[BatchedInput], *,
+                   task_metadata: TaskMetadata, hf_split: str, hf_subset: str,
+                   prompt_type: PromptType | None = None,
+                   **kwargs: Unpack[EncodeKwargs]) -> Array
+
+        Everything after ``inputs`` is keyword-only, matching the base class.
+        Defaults are added here so tests can call ``encode(["a", "b"])``
+        directly; MTEB itself always passes them.
 
         Parameters
         ----------
@@ -169,19 +177,36 @@ def _build_model_meta(model_name: str) -> Any | None:
     JSON is fully self-describing for the submission.
     """
     try:
-        from mteb import ModelMeta
+        # VERIFIED against mteb 2.20.11: ModelMeta lives in `mteb.models`, NOT
+        # at the top level - `from mteb import ModelMeta` raises ImportError.
+        from mteb.models import ModelMeta
     except ImportError:
         return None
 
     try:
+        # ModelMeta is a pydantic model with 17 REQUIRED fields. Most accept
+        # None, but they must all be passed explicitly - omitting any of them
+        # is a validation error, not a defaulted field.
         return ModelMeta(
+            loader=None,
             name=model_name,
             revision=None,
             release_date=None,
             languages=["eng-Latn"],
-            similarity_fn_name="cosine",
+            n_parameters=None,
+            memory_usage_mb=None,
+            max_tokens=None,
+            embed_dim=None,
+            license=None,
+            open_weights=True,
+            public_training_code=None,
+            public_training_data=None,
             framework=["Sentence Transformers"],
+            # Drives the inherited AbsEncoder.similarity implementation.
+            similarity_fn_name="cosine",
+            use_instructions=False,
+            training_datasets=None,
         )
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:  # pydantic ValidationError is not a TypeError
         logger.debug("Could not build ModelMeta (%s); letting MTEB infer it", exc)
         return None

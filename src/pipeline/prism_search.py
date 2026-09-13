@@ -100,6 +100,7 @@ class PrismSearch:
         hf_split: str | None = None,
         hf_subset: str | None = None,
         encode_kwargs: dict[str, Any] | None = None,
+        num_proc: int | None = None,
     ) -> None:
         """Preprocess and index the corpus. Called once before ``search``.
 
@@ -113,6 +114,11 @@ class PrismSearch:
             cache-key scoping.
         encode_kwargs:
             Forwarded from ``mteb.evaluate(..., encode_kwargs=...)``.
+        num_proc:
+            Worker count MTEB requests for dataset-side work. Accepted and
+            currently ignored - our indexing is single-process. It MUST stay
+            in the signature: mteb 2.20.11 passes it by keyword, so dropping
+            it raises TypeError the moment evaluation starts.
 
         Notes
         -----
@@ -177,6 +183,7 @@ class PrismSearch:
         top_k: int = 10,
         encode_kwargs: dict[str, Any] | None = None,
         top_ranked: dict[str, list[str]] | None = None,
+        num_proc: int | None = None,
     ) -> RetrievalOutput:
         """Retrieve, fuse and rerank for every query.
 
@@ -192,6 +199,9 @@ class PrismSearch:
             Present for reranking-style tasks: a precomputed candidate list per
             query that we must restrict to. ``None`` for AppsRetrieval, but
             honoured so this class also works on rerank tasks.
+        num_proc:
+            As in ``index`` - accepted, ignored, and required in the signature
+            because MTEB passes it by keyword.
 
         Returns
         -------

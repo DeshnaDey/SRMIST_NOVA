@@ -58,12 +58,13 @@ python -m pip install --upgrade pip
 **2. Install PyTorch — CPU build, first and on its own:**
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
 ```
 
-> Install torch *before* everything else. If you let the other packages pull it
-> in transitively, pip resolves the default CUDA wheels (~2.5 GB) that we cannot
-> use on CPU-only judging hardware.
+> Install torch *before* everything else. On Linux and in Docker this is
+> required: the default PyPI wheels are CUDA builds (~2.5 GB) that are useless
+> on CPU-only judging hardware. On macOS the PyPI wheel is already CPU-only, so
+> the flag is a harmless no-op — one command for everyone, no per-OS footgun.
 
 **3. Install the rest:**
 
@@ -73,15 +74,57 @@ pip install -r requirements.txt
 
 > ⚠️ **MTEB v2 is required — not v1.** The pipeline is written against
 > `mteb.evaluate`, `AbsEncoder` and `SearchProtocol`, none of which exist in v1.
-> Versions in `requirements.txt` are intentionally unpinned with
-> `# TODO: pin after checking current docs`. **Pin them before the first
-> team-wide install** so all four of us resolve identical versions.
 
 **4. Verify the install:**
 
 ```bash
+python -c "
+import mteb
+from mteb.models.abs_encoder import AbsEncoder
+from mteb.models import ModelMeta
+assert mteb.get_task('AppsRetrieval')
+assert hasattr(mteb, 'evaluate') and hasattr(mteb, 'SearchProtocol')
+print('OK', mteb.__version__)"
+```
+
+```bash
 pytest -m "not slow"
 ```
+
+Expect `32 passed, 53 skipped`. The skips are unimplemented stubs; the passes
+include regression tests that pin the MTEB v2 API surface.
+
+### Pinned versions
+
+All versions are **pinned and verified** — resolved 2026-09-14 on macOS 15
+(arm64) / CPython 3.11.15, and confirmed by a clean-room install from
+`requirements.txt` alone.
+
+| Package | Version |
+|---|---|
+| `torch` | 2.14.0 (CPU) |
+| `mteb` | **2.20.11** (v2) |
+| `sentence-transformers` | 6.0.1 |
+| `faiss-cpu` | 1.15.0 |
+| `rank-bm25` | 0.2.2 |
+| `datasets` | 5.0.1 |
+| `huggingface_hub` | 1.31.0 |
+| `numpy` | 2.4.6 |
+| `tqdm` | 4.70.1 |
+| `pytest` | 9.1.1 |
+
+**Import paths that are easy to get wrong** (all confirmed against 2.20.11 —
+each of these was wrong in the first draft and caught only by checking the
+installed package):
+
+- `AbsEncoder` → `mteb.models.abs_encoder.AbsEncoder` — *not* `mteb.AbsEncoder`
+  or `mteb.models.AbsEncoder`
+- `ModelMeta` → `mteb.models.ModelMeta` — *not* `mteb.ModelMeta`; it has 17
+  required fields, most nullable but all mandatory to pass
+- `SearchProtocol.index/search` both take a keyword-only **`num_proc`**
+
+Don't bump anything without re-running the verification block above and
+`pytest -m "not slow"`.
 
 ---
 

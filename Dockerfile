@@ -34,11 +34,21 @@ ENV PYTHONUNBUFFERED=1 \
 # Dependencies first, in their own layer, so code edits don't re-install torch.
 COPY requirements.txt .
 
-# torch must come from the CPU index BEFORE the rest, or pip resolves the
-# default CUDA wheels (~2.5 GB) that this image cannot use.
-# TODO: pin the torch version here to match requirements.txt once decided.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+# torch must come from the CPU index BEFORE the rest. This base image is
+# Linux, where the default PyPI wheels ARE the CUDA builds (~2.5 GB) - so
+# unlike on a Mac, the index-url here is load-bearing, not cosmetic.
+# Version kept in lockstep with requirements.txt.
+RUN pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
+
+# Fail the BUILD, not the graded run, if the MTEB v2 API has shifted.
+RUN python -c "\
+import mteb; \
+from mteb.models.abs_encoder import AbsEncoder; \
+from mteb.models import ModelMeta; \
+assert mteb.get_task('AppsRetrieval'); \
+assert hasattr(mteb, 'evaluate') and hasattr(mteb, 'SearchProtocol'); \
+print('mteb OK', mteb.__version__)"
 
 COPY src/ ./src/
 COPY scripts/ ./scripts/

@@ -23,10 +23,15 @@ from typing import Any, Iterable
 # =============================================================================
 
 #: Import paths tried, in order, when resolving the v2 encoder base class.
+#: VERIFIED against mteb 2.20.11: the real location is
+#: ``mteb.models.abs_encoder.AbsEncoder``. It is NOT re-exported as
+#: ``mteb.AbsEncoder`` or ``mteb.models.AbsEncoder``, so those two paths alone
+#: silently fall back to ``object`` and lose the inherited similarity defaults.
+#: The extra paths stay as cheap insurance against a future move.
 _ABS_ENCODER_PATHS: tuple[tuple[str, str], ...] = (
+    ("mteb.models.abs_encoder", "AbsEncoder"),
     ("mteb.models", "AbsEncoder"),
     ("mteb", "AbsEncoder"),
-    ("mteb.abstasks", "AbsEncoder"),
 )
 
 

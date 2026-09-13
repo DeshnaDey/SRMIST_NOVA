@@ -62,6 +62,87 @@ def test_search_before_index_raises() -> None:
 
 
 # =============================================================================
+# MTEB v2 API regression tests
+#
+# These run only when mteb is installed, and they exist because all three
+# assertions below were WRONG in the first draft of this scaffold - caught by
+# pinning the version and checking against the real package rather than by
+# reading the docs. The failure modes were: a silent fallback to `object`
+# (losing the inherited similarity implementation), a silently-None ModelMeta,
+# and a TypeError that would only have surfaced once evaluation started.
+#
+# If an mteb upgrade moves any of this, these fail in ~10 seconds instead of
+# 90 minutes into a run.
+# =============================================================================
+
+
+def test_abs_encoder_import_path_is_still_valid() -> None:
+    """AbsEncoder lives at mteb.models.abs_encoder - NOT mteb.AbsEncoder.
+
+    Our resolver falls back to `object` silently, so a moved symbol would
+    otherwise cost us the inherited similarity defaults with no error.
+    """
+    pytest.importorskip("mteb")
+    from mteb.models.abs_encoder import AbsEncoder
+
+    from src.pipeline.mteb_compat import resolve_abs_encoder
+
+    resolved, is_real = resolve_abs_encoder()
+    assert is_real, "resolver fell back to object - AbsEncoder has moved"
+    assert resolved is AbsEncoder
+
+
+def test_baseline_encoder_subclasses_real_abs_encoder() -> None:
+    """The baseline genuinely inherits MTEB's similarity implementation."""
+    pytest.importorskip("mteb")
+    from mteb.models.abs_encoder import AbsEncoder
+
+    assert isinstance(BaselineEncoder(), AbsEncoder)
+
+
+def test_model_meta_actually_builds() -> None:
+    """ModelMeta construction succeeds rather than silently returning None.
+
+    It is a pydantic model with 17 required fields; omitting any one of them
+    is a validation error, which _build_model_meta catches and swallows.
+    """
+    pytest.importorskip("mteb")
+    meta = BaselineEncoder().mteb_model_meta
+    assert meta is not None, "ModelMeta silently failed to build"
+    assert str(meta.similarity_fn_name).lower().endswith("cosine")
+
+
+def test_prism_search_signatures_match_real_search_protocol() -> None:
+    """Our index()/search() accept every parameter MTEB will pass.
+
+    `num_proc` is keyword-only and has no default in the protocol - omitting
+    it raises TypeError the moment evaluation starts.
+    """
+    mteb = pytest.importorskip("mteb")
+    protocol = mteb.SearchProtocol
+
+    for method in ("index", "search"):
+        expected = set(inspect.signature(getattr(protocol, method)).parameters)
+        actual = set(inspect.signature(getattr(PrismSearch, method)).parameters)
+        missing = expected - actual - {"self"}
+        assert not missing, f"{method}() is missing MTEB parameters: {sorted(missing)}"
+
+
+def test_apps_retrieval_task_resolves() -> None:
+    """The graded task exists under the name we evaluate."""
+    mteb = pytest.importorskip("mteb")
+    from src import config
+
+    assert mteb.get_task(config.MTEB_TASK_NAME) is not None
+
+
+def test_mteb_is_v2_not_v1() -> None:
+    """`evaluate` is v2; v1 exposed `MTEB(tasks).run(model)` instead."""
+    mteb = pytest.importorskip("mteb")
+    assert hasattr(mteb, "evaluate"), "installed mteb is v1 - this project needs v2"
+
+
+# =============================================================================
 # mteb_compat helpers - offline, fully implemented, must always pass
 # =============================================================================
 
