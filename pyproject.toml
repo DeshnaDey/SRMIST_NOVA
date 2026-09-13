@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prism-code-retrieval"
+version = "0.1.0"
+description = "Agentic Code Intelligence - NL-to-code retrieval for Samsung PRISM GenAI 2026"
+requires-python = ">=3.11"
+# Dependencies live in requirements.txt (with pinning instructions and the
+# torch CPU index-url note). Keeping them there avoids two sources of truth.
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Puts the repo root on sys.path so `from src...` works without installing.
+pythonpath = ["."]
+markers = [
+    "slow: needs a model download or a full evaluation run (deselect with -m 'not slow')",
+]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 90
+target-version = "py311"

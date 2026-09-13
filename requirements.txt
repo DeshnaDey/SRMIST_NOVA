@@ -1,0 +1,68 @@
+# =============================================================================
+# Samsung PRISM GenAI Hackathon 2026 - Theme 1: Agentic Code Intelligence
+# Python 3.11 | CPU-only
+# =============================================================================
+#
+# READ BEFORE INSTALLING
+# ----------------------
+# Every entry below is deliberately UNPINNED. Before the first team-wide
+# install, check each package's current release notes and replace the bare
+# name with `package==X.Y.Z`, then commit the pinned file so all four of us
+# resolve identical versions. Guessing versions is how we lose a day to a
+# silent API break the night before submission.
+#
+# -----------------------------------------------------------------------------
+# STEP 1 - torch, CPU BUILD ONLY. Install this FIRST, on its own, from the CPU
+# index. If you let the other packages pull torch in transitively, pip resolves
+# the default CUDA wheels (~2.5 GB) which we cannot use on CPU-only judging
+# hardware and which bloat the Docker image:
+#
+#     pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# TODO: pin after checking current docs
+torch                 # tensor backend for sentence-transformers; CPU wheel only
+
+# -----------------------------------------------------------------------------
+# STEP 2 - everything else: `pip install -r requirements.txt`
+# -----------------------------------------------------------------------------
+
+# ---- Evaluation harness -----------------------------------------------------
+# !! MTEB v2 IS REQUIRED - NOT v1. !!
+# The whole pipeline is written against the v2 API surface:
+#   - `mteb.evaluate(model, tasks=...)`      (v1 used `MTEB(tasks).run(model)`)
+#   - `AbsEncoder` / `EncoderProtocol`       (v2 `encode()` takes a DataLoader
+#                                             of batches, NOT a `list[str]`)
+#   - `SearchProtocol`                       (v2-only: custom `index()`/`search()`
+#                                             so our real hybrid pipeline - not a
+#                                             bare encoder - produces the scores)
+# A v1 install will fail at import, not at runtime, so pin a >=2 release.
+# TODO: pin after checking current docs  (must be v2.x - v2.3+ for FaissSearchIndex)
+mteb                  # benchmark harness; provides the AppsRetrieval task + NDCG/MRR
+
+# ---- Embedding models -------------------------------------------------------
+# TODO: pin after checking current docs
+sentence-transformers # loads the bi-encoder + cross-encoder reranker checkpoints
+
+# ---- Lexical retrieval ------------------------------------------------------
+# TODO: pin after checking current docs
+rank_bm25             # pure-Python BM25 (Okapi/BM25+) for the sparse half of hybrid
+
+# ---- Vector index -----------------------------------------------------------
+# TODO: pin after checking current docs
+faiss-cpu             # ANN index over snippet embeddings; CPU build (never faiss-gpu)
+
+# ---- Data loading -----------------------------------------------------------
+# TODO: pin after checking current docs
+datasets              # pulls CoIR-Retrieval/apps corpus + queries + qrels
+# TODO: pin after checking current docs
+huggingface_hub       # model/dataset download + local cache management
+
+# ---- Numerics / UX ----------------------------------------------------------
+# TODO: pin after checking current docs
+numpy                 # embedding matrices, score fusion arithmetic
+# TODO: pin after checking current docs
+tqdm                  # progress bars for the long encode/index passes
+
+# ---- Testing ----------------------------------------------------------------
+# TODO: pin after checking current docs
+pytest                # seed tests, categories A-H (see tests/README in tests/)

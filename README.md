@@ -1,0 +1,234 @@
+# PRISM — Agentic Code Intelligence
+
+**Samsung PRISM GenAI Hackathon 2026 · Theme 1**
+
+Natural-language retrieval over code. Given a query in plain English and a
+corpus of code snippets, rank the snippets by relevance.
+
+- **Dataset:** [`CoIR-Retrieval/apps`](https://huggingface.co/datasets/CoIR-Retrieval/apps)
+- **Evaluation:** MTEB **v2** `AppsRetrieval` task
+- **Metrics:** NDCG@10 (headline) and MRR
+- **Constraint:** CPU only. Nothing in this project may request a GPU.
+- **Python:** 3.11
+- **Release tag:** `PRISM_GENAI_HACKATHON_Y2026` _(not yet tagged — see [Submission](#submission))_
+
+---
+
+## Approach
+
+A hybrid retrieve → fuse → rerank pipeline:
+
+```
+ query ──► query preprocessing ──┐
+                                 ├──► dense retrieval (bi-encoder + FAISS) ──┐
+ corpus ─► snippet preprocessing ┘                                           ├─► RRF fusion ──► cross-encoder rerank ──► top-k
+                                 └──► BM25 retrieval (lexical) ──────────────┘
+```
+
+Why this shape:
+
+- **Dense retrieval** catches semantic matches — "sort a list without built-ins"
+  finds a bubble-sort implementation that shares no vocabulary with the query.
+- **BM25** catches what dense retrieval blurs away — exact identifiers, API
+  names, error strings. Code queries quote these constantly.
+- **RRF fusion** merges the two by *rank*, not score. Cosine similarities live
+  in `[-1, 1]`; BM25 scores are unbounded. Summing them directly hands the
+  ranking to BM25 for no better reason than its numbers being bigger.
+- **Cross-encoder reranking** reorders the survivors. It scores query and
+  snippet jointly, which is far more accurate and far too slow to run over the
+  whole corpus — so it only ever sees the fused top-N.
+
+---
+
+## Setup
+
+```bash
+git clone https://github.com/DeshnaDey/Samsung-PRISM.git
+cd Samsung-PRISM
+```
+
+**1. Create and activate the virtual environment** (Python 3.11):
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+```
+
+**2. Install PyTorch — CPU build, first and on its own:**
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+> Install torch *before* everything else. If you let the other packages pull it
+> in transitively, pip resolves the default CUDA wheels (~2.5 GB) that we cannot
+> use on CPU-only judging hardware.
+
+**3. Install the rest:**
+
+```bash
+pip install -r requirements.txt
+```
+
+> ⚠️ **MTEB v2 is required — not v1.** The pipeline is written against
+> `mteb.evaluate`, `AbsEncoder` and `SearchProtocol`, none of which exist in v1.
+> Versions in `requirements.txt` are intentionally unpinned with
+> `# TODO: pin after checking current docs`. **Pin them before the first
+> team-wide install** so all four of us resolve identical versions.
+
+**4. Verify the install:**
+
+```bash
+pytest -m "not slow"
+```
+
+---
+
+## Running the evaluation
+
+Day-one baseline — a bare bi-encoder, no pipeline stages:
+
+```bash
+python scripts/run_eval.py --pipeline baseline
+```
+
+The full hybrid pipeline:
+
+```bash
+python scripts/run_eval.py --pipeline full
+```
+
+Fast smoke run while developing (**not a reportable score**):
+
+```bash
+python scripts/run_eval.py --pipeline baseline --limit 50
+```
+
+Both write **`appsretrieval_results.json`** and print NDCG@10 / MRR. Copy those
+into [`experiments.md`](experiments.md) with what you changed.
+
+### Docker (stub)
+
+```bash
+docker build -t prism-retrieval .
+docker run --rm -v "$PWD/results:/app/results" prism-retrieval
+```
+
+The `Dockerfile` is a **stub with open TODOs** — it has the right shape and the
+CPU-only constraints, but has not been built or tested yet.
+
+---
+
+## Project structure
+
+```
+.
+├── src/
+│   ├── config.py           ← every tunable lives here. Start reading here.
+│   ├── interfaces.py       ← the stage contracts. Read this SECOND.
+│   ├── query/              ← stage 1: query cleaning + classification
+│   ├── corpus/             ← stage 2: snippet normalization + index building
+│   ├── retrieval/          ← stage 3: dense, BM25, fusion, reranking
+│   ├── pipeline/           ← MTEB v2 adapters (baseline encoder + full search)
+│   └── versioning/         ← content-hashed embedding cache
+├── tests/                  ← pytest, categories A–H
+├── scripts/run_eval.py     ← the only way to produce a score
+├── experiments.md          ← the experiment log. Every run gets a row.
+├── Arch diagrams/          ← architecture diagrams (.drawio)
+├── requirements.txt
+└── Dockerfile
+```
+
+### The two files that matter most
+
+**`src/config.py`** — every model name, top-k, batch size and feature flag.
+A result is reproducible from a git SHA because everything that shapes it is
+here. Values marked `# PLACEHOLDER` are unvalidated guesses; replace them with
+something measured and log the delta.
+
+**`src/interfaces.py`** — the contracts all four workstreams build against.
+Treat it as frozen unless the whole team agrees to a change; four people are
+building against these signatures simultaneously.
+
+---
+
+## How the four workstreams fit together
+
+Each stage is an abstract base class in `src/interfaces.py` with a no-op
+passthrough implementation already in place, so **the pipeline is green from day
+one** and each stage is a single-flag A/B test.
+
+| # | Workstream | Owns | Implements | Enable with |
+|---|-----------|------|-----------|-------------|
+| 1 | **query** | `src/query/` | `QueryProcessor` | `ENABLE_QUERY_PREPROCESSING` |
+| 2 | **corpus** | `src/corpus/` | `SnippetProcessor`, `IndexBuilder` | `ENABLE_SNIPPET_PREPROCESSING` |
+| 3 | **retrieval** | `src/retrieval/` | `Retriever`, `FusionStrategy`, `Reranker` | `ENABLE_BM25`, `ENABLE_RERANK` |
+| 4 | **eval** | `tests/`, `src/versioning/` | `EmbeddingCache`, seed tests | `ENABLE_EMBEDDING_CACHE` |
+
+Stubs are marked `# TODO(owner):` with a docstring stating the expected input
+and output. **`src/pipeline/prism_search.py` is already fully wired** — as each
+stub is filled in, the full pipeline starts working with no changes to that
+file. Nobody needs to edit it to ship their own stage, which matters when all
+four of us would otherwise be editing it at once.
+
+### Rules that hold at every stage
+
+1. **IDs are sacred.** A snippet's `id` must survive preprocessing, indexing,
+   retrieval, fusion and reranking byte-for-byte. MTEB joins our output to its
+   qrels by that string — mangle it and the score silently drops to zero with
+   no error anywhere.
+2. **Stages are pure.** Same input and config, same output. The embedding cache
+   is the one sanctioned exception.
+3. **Never raise on bad input.** Degrade instead. A malformed query should not
+   kill a two-hour evaluation at query 9,000.
+4. **Higher is better**, and ranked lists are always sorted descending.
+
+---
+
+## Testing
+
+```bash
+pytest                    # everything
+pytest -m "not slow"      # skip anything needing a model download (default for CI)
+pytest tests/test_f_fusion.py
+```
+
+| File | Category | Owner |
+|------|----------|-------|
+| `test_a_query_preprocessing.py` | A — query cleaning | query |
+| `test_b_snippet_preprocessing.py` | B — snippet normalization, id preservation | corpus |
+| `test_c_indexing.py` | C — FAISS / BM25 construction | corpus |
+| `test_d_dense_retrieval.py` | D — bi-encoder search | retrieval |
+| `test_e_bm25_retrieval.py` | E — lexical search | retrieval |
+| `test_f_fusion.py` | F — RRF / weighted fusion | retrieval |
+| `test_g_reranking.py` | G — cross-encoder reordering | retrieval |
+| `test_h_pipeline_e2e.py` | H — end-to-end + MTEB contract | eval |
+
+Placeholder tests are marked `@pytest.mark.skip` with a `TODO(owner)` reason —
+drop the marker as you implement. The contract tests at the top of each file
+already pass against the no-op implementations and should keep passing against
+the real ones.
+
+---
+
+## Experiment log
+
+[`experiments.md`](experiments.md) tracks every run: date, who, what changed,
+NDCG@10, MRR, commit. **Change one thing at a time**, and log negative results
+too — they stop the next person retrying the same idea at 3am.
+
+---
+
+## Submission
+
+- [ ] Pin every version in `requirements.txt`
+- [ ] Record the baseline row in `experiments.md`
+- [ ] Full pipeline run committed with `appsretrieval_results.json`
+- [ ] `Dockerfile` actually built and tested
+- [ ] Tag the release:
+
+```bash
+git tag -a PRISM_GENAI_HACKATHON_Y2026 -m "Samsung PRISM GenAI Hackathon 2026 submission"
+git push origin PRISM_GENAI_HACKATHON_Y2026
+```
