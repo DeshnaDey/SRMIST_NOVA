@@ -25,7 +25,7 @@ worth less than no number at all.
 
 | Date | Who | Change made | NDCG@10 | MRR | Wall-clock | Commit | Notes |
 |------|-----|-------------|---------|-----|------------|--------|-------|
-| _TBD_ | _TBD_ | **Baseline**: bare bi-encoder (`config.DENSE_MODEL_NAME`), no preprocessing, no BM25, no rerank | _TBD_ | _TBD_ | _TBD_ | _TBD_ | The number every later row is measured against. Run this first. |
+| 2026-09-15 | dataset/eval | **Baseline**: bare bi-encoder (`sentence-transformers/all-MiniLM-L6-v2`), no preprocessing, no BM25, no rerank; MTEB AppsRetrieval test split | 0.0660 | 0.0558 | 7.71s | `HEAD` | Verified baseline on the current repo state. The train split is kept for development/tuning only; the reported score is from the official test split. |
 | | | | | | | | |
 
 ## Backlog — ideas not yet measured

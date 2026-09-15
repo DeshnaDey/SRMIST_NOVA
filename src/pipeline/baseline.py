@@ -74,6 +74,48 @@ class BaselineEncoder(_AbsEncoder):  # type: ignore[misc,valid-type]
 
     # -- the MTEB v2 contract -------------------------------------------------
 
+    def _truncate_long_texts(self, texts: list[str]) -> list[str]:
+        """Avoid token overflow on long APPS code snippets without changing the pipeline.
+
+        The baseline intentionally leaves the retrieval architecture alone; this is
+        only a safe guard for the embedding model, which otherwise can receive
+        overlong competitive-programming solutions and silently truncate or spend
+        extra CPU on very long inputs.
+        """
+        if not texts:
+            return texts
+
+        tokenizer = getattr(self.model, "tokenizer", None)
+        if tokenizer is None:
+            return texts
+
+        limit = config.MAX_SEQ_LENGTH
+        if limit is None:
+            limit = getattr(self.model, "max_seq_length", None)
+        if limit is None:
+            limit = getattr(tokenizer, "model_max_length", None)
+        if not isinstance(limit, int) or limit <= 0:
+            return texts
+
+        # APPS solutions can exceed the typical 512-token ceiling of general prose
+        # models. Keep the safeguard conservative and deterministic for the
+        # baseline while preserving the rest of the retrieval pipeline.
+        limit = min(limit, 512)
+
+        truncated: list[str] = []
+        for text in texts:
+            try:
+                token_ids = tokenizer.encode(str(text), add_special_tokens=False)
+                if len(token_ids) <= limit:
+                    truncated.append(str(text))
+                else:
+                    truncated.append(
+                        tokenizer.decode(token_ids[:limit], skip_special_tokens=True)
+                    )
+            except Exception:
+                truncated.append(str(text))
+        return truncated
+
     def encode(
         self,
         inputs: Any,
@@ -133,6 +175,8 @@ class BaselineEncoder(_AbsEncoder):  # type: ignore[misc,valid-type]
         prefix = _prefix_for(prompt_type)
         if prefix:
             texts = [f"{prefix}{t}" for t in texts]
+
+        texts = self._truncate_long_texts(texts)
 
         embeddings = self.model.encode(
             texts,
