@@ -41,6 +41,7 @@ Move a row into the table above once it has a number next to it.
 | Strip comments from snippets | corpus | Less noise — but comments may be the only NL bridge to the query. Test both directions | not started |
 | Truncate snippets head vs. tail | corpus | APPS solutions exceed the context window; which half carries the signal? Note TASK A: only 23.5% of snippets overflow, vs **61.9% of queries** — the query side is the bigger loss and has no knob yet. | not started |
 | Compress query: drop Input/Output format sections and worked examples, keep the narrative problem core | query | Queries truncate **61.9%** at 254 tokens and the example blocks are formatting noise eating the budget. (Supersedes "strip boilerplate framing", which assumed a shared prefix that does not exist — 2.0%, not every query.) | not started |
+| Index `meta_information.starter_code` alongside the snippet body | corpus | Every corpus row has a populated `meta_information` dict with a `starter_code` field; we index `text` only, so it is signal the retriever never sees. Cheap to test. | not started |
 | Query category routing | query | Different `QUERY_CATEGORIES` may want different top-k or fusion weights | not started |
 | Tune RRF `k` | retrieval | 60 is the paper default, not a measured optimum for this corpus | not started |
 | Split snake_case/camelCase in BM25 tokenizer | corpus | Lets "binary search" match `binary_search` | not started |

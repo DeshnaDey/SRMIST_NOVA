@@ -281,6 +281,18 @@ def _corpus_text(record: dict[str, Any]) -> str:
     SearchProtocol path and the bare-encoder baseline index identical strings -
     otherwise the baseline and the full pipeline aren't comparable, and the
     experiments.md deltas mean nothing.
+
+    DEAD CODE ON THIS DATASET - measured, kept deliberately.
+    The `title` column of CoIR-Retrieval/apps is empty for every row: 0/8,765
+    corpus entries and 0/5,000 queries are non-empty, one distinct value ("").
+    So the title branch never fires here and this always returns the body.
+
+    Not removed, because it is the mechanism that keeps the bare-encoder
+    baseline and the SearchProtocol path encoding byte-identical strings. If
+    one side drops it the two stop being comparable and every experiments.md
+    delta between them becomes meaningless. Delete it only if you delete it
+    from ALL of: src/pipeline/mteb_compat.py, src/pipeline/prism_search.py,
+    scripts/inspect_data.py.
     """
     body = str(record.get("text", "") or "")
     title = str(record.get("title", "") or "")

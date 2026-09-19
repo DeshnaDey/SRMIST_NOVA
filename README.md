@@ -206,6 +206,12 @@ earn an `experiments.md` row.
 > `train`/`test`, and every query's gold doc sits in its own partition, so
 > filtering on it shrinks the candidate pool and manufactures a large fake gain.
 
+> **Unused signal: `meta_information.starter_code`.** Every corpus row carries a
+> populated `meta_information` dict holding the source problem URL and a
+> `starter_code` field. We currently index `text` only, so `starter_code` is
+> real content the retriever never sees. Unlike `partition` this is an
+> opportunity rather than a hazard — but measure it, do not assume it helps.
+
 Both write **`appsretrieval_results.json`** and print NDCG@10 / MRR. Copy those
 into [`experiments.md`](experiments.md) with what you changed.
 

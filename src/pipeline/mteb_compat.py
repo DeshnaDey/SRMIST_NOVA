@@ -134,7 +134,20 @@ def _texts_from_mapping(item: dict[str, Any]) -> list[str]:
 
 
 def _join_title_body(title: str, body: Any) -> str:
-    """Combine a title and body into one encodable string."""
+    """Combine a title and body into one encodable string.
+
+    DEAD CODE ON THIS DATASET - measured, kept deliberately.
+    The `title` column of CoIR-Retrieval/apps is empty for every row: 0/8,765
+    corpus entries and 0/5,000 queries are non-empty, one distinct value ("").
+    So the title branch never fires here and this always returns the body.
+
+    Not removed, because it is the mechanism that keeps the bare-encoder
+    baseline and the SearchProtocol path encoding byte-identical strings. If
+    one side drops it the two stop being comparable and every experiments.md
+    delta between them becomes meaningless. Delete it only if you delete it
+    from ALL of: src/pipeline/mteb_compat.py, src/pipeline/prism_search.py,
+    scripts/inspect_data.py.
+    """
     body_str = "" if body is None else str(body)
     title_str = "" if title is None else str(title)
     if title_str.strip():
