@@ -42,6 +42,7 @@ sentence_transformers_cache/
 data/*
 !data/.gitkeep
 !data/inspection_report.md
+!data/model_benchmark.json
 *.faiss
 *.index
 *.npy

@@ -64,10 +64,8 @@ class BaselineEncoder(_AbsEncoder):  # type: ignore[misc,valid-type]
     def model(self) -> Any:
         """The loaded SentenceTransformer, instantiated on first access."""
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
             logger.info("Loading bi-encoder %s on %s", self.model_name, config.DEVICE)
-            self._model = SentenceTransformer(self.model_name, device=config.DEVICE)
+            self._model = _load_sentence_transformer(self.model_name)
             if config.MAX_SEQ_LENGTH is not None:
                 self._model.max_seq_length = config.MAX_SEQ_LENGTH
         return self._model
@@ -144,6 +142,90 @@ class BaselineEncoder(_AbsEncoder):  # type: ignore[misc,valid-type]
             show_progress_bar=kwargs.get("show_progress_bar", False),
         )
         return np.asarray(embeddings, dtype=np.float32)
+
+
+#: Attention backends tried, in order, when a checkpoint asks for one the
+#: installed transformers does not accept. "sdpa" first because it is the fast
+#: path; "eager" is the universally-supported fallback.
+_ATTENTION_FALLBACKS: tuple[str, ...] = ("sdpa", "eager")
+
+#: Checkpoints allowed to execute modeling code downloaded from the Hub.
+#:
+#: DELIBERATELY AN ALLOWLIST, NOT A FLAG. `trust_remote_code=True` runs
+#: third-party Python on this machine, so it is granted per checkpoint after a
+#: human decision, never as a global default that a later model swap inherits
+#: silently.
+#:
+#: jina-embeddings-v2-base-code genuinely cannot work without it: its config
+#: declares `position_embedding_type: "alibi"`, which stock BertModel does not
+#: implement, and its own sentence_bert_config.json ships
+#: `model_args: {"trust_remote_code": true}`. Loaded without it, transformers
+#: falls back to plain BERT and you get a model that silently cannot address
+#: its advertised 8192-token context - the failure this project is most
+#: exposed to, given 89% of test queries overflow a 254-token window.
+#: The code is fetched from the companion repo jinaai/jina-bert-v2-qk-post-norm.
+_TRUST_REMOTE_CODE: frozenset[str] = frozenset({
+    "jinaai/jina-embeddings-v2-base-code",
+})
+
+
+def _load_sentence_transformer(model_name: str) -> Any:
+    """Load ``model_name``, working around stale ``attn_implementation`` values.
+
+    Some checkpoints pin an attention backend in their config that a newer
+    transformers no longer accepts. ``jinaai/jina-embeddings-v2-base-code``
+    requests ``attn_implementation="torch"``, which transformers 5.17.0 rejects
+    outright::
+
+        ValueError: Specified `attn_implementation="torch"` is not supported.
+
+    That is a checkpoint/library mismatch, not a dependency problem - the fix
+    is to name a backend the installed library does support, NOT to move any
+    pinned version. The override is applied only after the plain load has
+    already failed for this specific reason, so every other model keeps
+    whatever its own config asked for.
+
+    Raises the original error if no fallback works.
+    """
+    from sentence_transformers import SentenceTransformer
+
+    extra: dict[str, Any] = {}
+    if model_name in _TRUST_REMOTE_CODE:
+        logger.warning(
+            "%s is on the remote-code allowlist: loading it EXECUTES modeling "
+            "code downloaded from the Hub. See _TRUST_REMOTE_CODE.", model_name,
+        )
+        extra["trust_remote_code"] = True
+
+    try:
+        return SentenceTransformer(model_name, device=config.DEVICE, **extra)
+    except ValueError as exc:
+        if "attn_implementation" not in str(exc):
+            raise
+        original = exc
+
+    # The rejected value lives in the checkpoint's own config.json, so it has
+    # to be overridden on the CONFIG - model_kwargs loses to the already-built
+    # config object that SentenceTransformer passes down.
+    for backend in _ATTENTION_FALLBACKS:
+        try:
+            model = SentenceTransformer(
+                model_name,
+                device=config.DEVICE,
+                config_kwargs={"attn_implementation": backend},
+                **extra,
+            )
+        except (ValueError, TypeError) as exc:
+            logger.debug("attn_implementation=%r rejected for %s (%s)",
+                         backend, model_name, exc)
+            continue
+        logger.warning(
+            "%s pins an attention backend this transformers rejects; loaded it "
+            "with attn_implementation=%r instead.", model_name, backend,
+        )
+        return model
+
+    raise original
 
 
 def _prefix_for(prompt_type: Any) -> str:
