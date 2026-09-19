@@ -146,6 +146,16 @@ installed package):
 - `ModelMeta` → `mteb.models.ModelMeta` — *not* `mteb.ModelMeta`; it has 17
   required fields, most nullable but all mandatory to pass
 - `SearchProtocol.index/search` both take a keyword-only **`num_proc`**
+- `TaskResult` → `mteb.results.task_result.TaskResult`, re-exported as
+  `mteb.TaskResult` — *not* `mteb.load_results.task_results`, which is the
+  v1-era path and fails silently if you wrap the import in a try/except
+
+**MTEB rounds every score to 6 decimal places when it writes a result to
+disk** (`TaskResult._round_scores(..., 6)`). Our `appsretrieval_results.json`
+serialises the in-memory object *before* that happens, so it carries full
+float precision and will not byte-match MTEB's own cached copy. That is a
+superset, not a mismatch — compare the two at 6dp, which is what
+`scripts/validate_results.py` does.
 
 Don't bump anything without re-running the verification block above and
 `pytest -m "not slow"`.

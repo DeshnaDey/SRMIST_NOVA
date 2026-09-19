@@ -263,23 +263,48 @@ NORMALIZE_EMBEDDINGS: bool = True
 
 # ---- Bi-encoder (dense) -----------------------------------------------------
 
-#: PLACEHOLDER - the day-one baseline model. Pick something small and CPU-fast
-#: first; only move to a bigger checkpoint once the harness is green end to end.
-#: Candidates worth benchmarking: a general MiniLM-class model vs. a
-#: code-specific bi-encoder. Log every swap in experiments.md.
-DENSE_MODEL_NAME: str = "sentence-transformers/all-MiniLM-L6-v2"  # PLACEHOLDER
+#: MEASURED on the full train split - see experiments.md and
+#: data/model_benchmark.json. Selected on recall@100 (0.6870), which is the
+#: ceiling on anything the reranker can later recover; it also led NDCG@10 and
+#: MRR, and was marginally the fastest of the 512-token candidates.
+#:
+#:     model         r@100    r@10   NDCG@10   encode   q-latency
+#:     all-MiniLM    0.6560  0.5222  0.42349   114.8s     19.35ms
+#:     e5-base-v2    0.6728  0.5226  0.43748   872.4s    167.89ms
+#:     bge-base-1.5  0.6642  0.5460  0.45628   884.1s    172.25ms
+#:     arctic-m      0.6870  0.5458  0.45863   842.8s    160.66ms  <- selected
+DENSE_MODEL_NAME: str = "Snowflake/snowflake-arctic-embed-m"
 
 #: Encoder batch size. Lower it if the CPU box starts swapping.
 #: PLACEHOLDER
 BATCH_SIZE: int = 32
 
-#: Token limit for the bi-encoder; None = use the checkpoint's own default.
-MAX_SEQ_LENGTH: int | None = None  # PLACEHOLDER
+#: Token limit for the bi-encoder; None = use the checkpoint's own default,
+#: subject to ENCODER_WINDOW_CAP below.
+MAX_SEQ_LENGTH: int | None = None
 
-#: Some checkpoints (E5, BGE, GTE) require asymmetric prefixes and silently
-#: underperform without them. Leave empty for models that don't use prompts.
-#: PLACEHOLDER
-QUERY_PROMPT_PREFIX: str = ""
+#: Hard ceiling on the encoder window, whatever a checkpoint advertises.
+#:
+#: The corpus maximum is 60,599 tokens while p99 is only 1,023, so this binds
+#: on a handful of documents. It matters because attention is quadratic: under
+#: a 254-token model that outlier was truncated away for free, but hand it to
+#: a model advertising 8k-32k and those few documents can dominate the entire
+#: corpus encode. Set to None to honour the checkpoint's full window.
+ENCODER_WINDOW_CAP: int | None = 2_048
+
+#: Some checkpoints require asymmetric prefixes and silently underperform
+#: without them - the run completes and the number is just quietly bad.
+#: MUST be kept in step with DENSE_MODEL_NAME. Known schemes:
+#:
+#:   Snowflake/snowflake-arctic-embed-m  query only, instruction below
+#:       (card usage: "use the query prefix below (just on the query)")
+#:   BAAI/bge-base-en-v1.5               query only, same instruction string
+#:       (card "Usage for Retrieval": no instruction on passages)
+#:   intfloat/e5-base-v2                 "query: " / "passage: "
+#:       (card FAQ, question 1 - asymmetric retrieval uses both)
+#:   sentence-transformers/all-MiniLM-*  none
+#:   jinaai/jina-embeddings-v2-base-code none
+QUERY_PROMPT_PREFIX: str = "Represent this sentence for searching relevant passages: "
 DOCUMENT_PROMPT_PREFIX: str = ""
 
 # ---- BM25 (sparse) ----------------------------------------------------------
