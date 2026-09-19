@@ -24,7 +24,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import random
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +56,74 @@ def build_model(pipeline: str) -> Any:
         logger.info("Full pipeline: hybrid retrieve -> fuse -> rerank")
         return PrismSearch()
     raise ValueError(f"Unknown pipeline {pipeline!r}; expected 'baseline' or 'full'")
+
+
+def prepare_task(split: str, limit: int | None) -> Any:
+    """Load the graded task, optionally on a non-default split and subsampled.
+
+    Why this exists
+    ---------------
+    ``mteb.evaluate`` has no ``limit`` argument, and the baseline path never
+    reaches ``PrismSearch.search`` (MTEB wraps a bare encoder into its own
+    search model), so ``config.SMOKE_TEST_QUERY_LIMIT`` is invisible to it.
+    A smoke run therefore has to be produced by shrinking the task's own query
+    set before evaluation starts.
+
+    ``AppsRetrieval`` also declares ``eval_splits == ["test"]`` only, so any
+    other split has to be requested explicitly or ``load_data()`` simply will
+    not materialise it. Verified against mteb 2.20.11.
+
+    Parameters
+    ----------
+    split:
+        Split to evaluate. ``"test"`` for official numbers; ``"train"`` for
+        experimentation.
+    limit:
+        Keep only this many queries, sampled deterministically. ``None``
+        evaluates the whole split.
+
+    Returns
+    -------
+    AbsTask
+        A loaded task whose query set and qrels have been narrowed together.
+        The corpus is deliberately left at full size: shrinking it would make
+        retrieval artificially easy and the number meaningless.
+    """
+    import mteb
+
+    task = mteb.get_task(config.MTEB_TASK_NAME)
+    try:
+        task._eval_splits = [split]
+    except Exception:  # pragma: no cover - defensive
+        task.metadata.eval_splits = [split]
+
+    task.load_data()
+
+    if limit is None:
+        return task
+
+    subset = task.hf_subsets[0]
+    block = task.dataset[subset][split]
+    queries, qrels = block["queries"], block["relevant_docs"]
+
+    # Deterministic by construction: sort first (HuggingFace row order is not
+    # guaranteed stable across dataset revisions), then sample with a fixed
+    # seed. Two runs on the same split and limit see the identical subset, so
+    # a model-vs-model delta is a real delta and not a resampling artifact.
+    ordered = sorted(str(row["id"]) for row in queries)
+    rng = random.Random(config.RANDOM_SEED)
+    keep = set(rng.sample(ordered, min(limit, len(ordered))))
+
+    block["queries"] = queries.filter(lambda row: str(row["id"]) in keep)
+    # Narrow the qrels to match. Leaving them wide would have MTEB scoring
+    # against relevance judgements for queries we never ran.
+    block["relevant_docs"] = {q: v for q, v in qrels.items() if q in keep}
+
+    logger.info(
+        "Smoke subset: %d/%d queries (seed=%d), corpus left at full size",
+        block["queries"].num_rows, len(ordered), config.RANDOM_SEED,
+    )
+    return task
 
 
 def extract_scores(results: Any) -> dict[str, float]:
@@ -125,10 +195,17 @@ def main() -> int:
         help="Which model to evaluate (default: baseline).",
     )
     parser.add_argument(
+        "--split",
+        default="test",
+        help="Split to evaluate. 'train' for experiments, 'test' for official "
+             "numbers only (default: test).",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=None,
-        help="Cap queries for a smoke run. NOT a reportable score.",
+        help="Cap queries for a smoke run, sampled deterministically from "
+             "config.RANDOM_SEED. NOT a reportable score.",
     )
     parser.add_argument(
         "--output",
@@ -174,25 +251,34 @@ def main() -> int:
 
     model = build_model(args.pipeline)
 
-    logger.info("Loading task %s", config.MTEB_TASK_NAME)
-    tasks = mteb.get_tasks(tasks=[config.MTEB_TASK_NAME])
+    logger.info("Loading task %s (split=%s)", config.MTEB_TASK_NAME, args.split)
+    task = prepare_task(args.split, args.limit)
 
     logger.info("Running evaluation (CPU-only; this takes a while)")
+    started = time.perf_counter()
     results = mteb.evaluate(
         model,
-        tasks=tasks,
-        # TODO(eval): confirm the supported kwargs against the pinned mteb
-        # version - `cache=` and `prediction_folder=` are also available and
-        # `prediction_folder` is worth turning on for error analysis.
+        tasks=[task],
         encode_kwargs={"batch_size": config.BATCH_SIZE},
+        # MTEB defaults to a results cache at ~/.cache/mteb with
+        # overwrite_strategy="only-missing", which will happily hand back a
+        # previous run's scores instead of re-evaluating. That is exactly how
+        # a model comparison silently compares one model against itself, so
+        # every run here is forced to actually run.
+        overwrite_strategy="always",
     )
+    wall_clock = time.perf_counter() - started
+    logger.info("Evaluation finished in %.1fs (%.1f min)", wall_clock, wall_clock / 60)
 
     payload = {
         "task": config.MTEB_TASK_NAME,
         "pipeline": args.pipeline,
+        "split": args.split,
         "release_tag": config.RELEASE_TAG,
         "config": config.describe(),
         "smoke_run": args.limit is not None,
+        "query_limit": args.limit,
+        "wall_clock_seconds": round(wall_clock, 1),
         "results": to_serializable(results),
     }
 
@@ -204,16 +290,19 @@ def main() -> int:
     scores = extract_scores(results)
     if scores:
         print("\n" + "=" * 56)
-        print(f"  {config.MTEB_TASK_NAME}  ({args.pipeline})")
+        print(f"  {config.MTEB_TASK_NAME}  ({args.pipeline}, split={args.split})")
         print("=" * 56)
         for name in (config.PRIMARY_METRIC, config.SECONDARY_METRIC):
             if name in scores:
                 print(f"  {name:<24} {scores[name]:.4f}")
+        print(f"  {'wall_clock':<24} {wall_clock:.1f}s ({wall_clock / 60:.1f} min)")
         print("=" * 56)
-        if args.limit is None:
-            print("  -> add a row to experiments.md\n")
-        else:
+        if args.limit is not None:
             print("  -> SMOKE RUN, not reportable\n")
+        elif args.split != "test":
+            print(f"  -> split={args.split}: experiment only, not an official number\n")
+        else:
+            print("  -> add a row to experiments.md\n")
     else:
         logger.warning(
             "Could not locate %s in the results object; inspect %s by hand "
