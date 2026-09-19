@@ -65,6 +65,10 @@ CANDIDATES: dict[str, dict[str, Any]] = {
         "prefix_source": "Incumbent baseline. Card documents no prefix scheme.",
         "published_coir_apps": None,
     },
+    # NOT RUNNABLE on the pinned stack - kept so nobody re-adds it thinking it
+    # was simply overlooked. Its remote modeling code targets transformers 4.x
+    # and dies on 5.17.0; see _TRUST_REMOTE_CODE in src/pipeline/baseline.py
+    # for the three separate breakages and why we stopped shimming them.
     "jina-code": {
         "name": "jinaai/jina-embeddings-v2-base-code",
         "query_prefix": "",
@@ -73,7 +77,7 @@ CANDIDATES: dict[str, dict[str, Any]] = {
         "prefix_source": (
             "Model card usage examples embed raw strings directly; no prefix "
             "documented anywhere on the card. 161M params, 8192 ctx via ALiBi, "
-            "mean pooling + L2 norm."
+            "mean pooling + L2 norm. BLOCKED: incompatible with transformers 5.x."
         ),
         "published_coir_apps": None,
     },

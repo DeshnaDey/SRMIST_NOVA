@@ -179,72 +179,39 @@ _ATTENTION_FALLBACKS: tuple[str, ...] = ("sdpa", "eager")
 #: its advertised 8192-token context - the failure this project is most
 #: exposed to, given 89% of test queries overflow a 254-token window.
 #: The code is fetched from the companion repo jinaai/jina-bert-v2-qk-post-norm.
-_TRUST_REMOTE_CODE: frozenset[str] = frozenset({
-    "jinaai/jina-embeddings-v2-base-code",
-})
+#: EMPTY, and jina is the reason. See below before adding anything here.
+_TRUST_REMOTE_CODE: frozenset[str] = frozenset()
 
-
-def _install_legacy_transformers_shims() -> list[str]:
-    """Restore transformers 4.x helpers that 5.x removed, for remote code.
-
-    WHY THIS IS HERE AND NOT A VERSION CHANGE
-    -----------------------------------------
-    ``jinaai/jina-embeddings-v2-base-code`` ships its own modeling code, and
-    that code was written against transformers 4.x. On the pinned stack
-    (transformers 5.17.0, which ``sentence-transformers==6.0.1`` resolves to)
-    it dies at import::
-
-        ImportError: cannot import name 'find_pruneable_heads_and_indices'
-                     from 'transformers.pytorch_utils'
-
-    Downgrading transformers is not an option - the versions here are pinned
-    and verified, and transformers is what sentence-transformers and mteb are
-    resolved against. So the missing symbol is re-supplied instead.
-
-    WHAT IS ACTUALLY BEING RESTORED
-    -------------------------------
-    ``find_pruneable_heads_and_indices`` computes which attention-head slices
-    survive a pruning request. It is pure, ~10 lines, and reproduced here from
-    the 4.x implementation. Nothing in this project prunes heads, so on every
-    normal inference path it is imported and never called - it only needs to
-    exist for the module-level import to succeed.
-
-    SCOPE
-    -----
-    Called only immediately before loading a checkpoint on
-    ``_TRUST_REMOTE_CODE``, and it only ever ADDS a name that is absent. A
-    transformers that still provides the symbol is left untouched.
-
-    Returns
-    -------
-    list[str]
-        Names actually injected, for logging.
-    """
-    import torch
-    from transformers import pytorch_utils
-
-    installed: list[str] = []
-
-    if not hasattr(pytorch_utils, "find_pruneable_heads_and_indices"):
-        def find_pruneable_heads_and_indices(
-            heads: Any, n_heads: int, head_size: int, already_pruned_heads: Any
-        ) -> tuple[Any, Any]:
-            """Verbatim behaviour of the transformers 4.x helper."""
-            mask = torch.ones(n_heads, head_size)
-            heads = set(heads) - set(already_pruned_heads)
-            for head in heads:
-                shift = sum(1 if h < head else 0 for h in already_pruned_heads)
-                mask[head - shift] = 0
-            mask = mask.view(-1).contiguous().eq(1)
-            index = torch.arange(len(mask))[mask].long()
-            return heads, index
-
-        pytorch_utils.find_pruneable_heads_and_indices = (
-            find_pruneable_heads_and_indices
-        )
-        installed.append("find_pruneable_heads_and_indices")
-
-    return installed
+# jinaai/jina-embeddings-v2-base-code DOES NOT WORK ON THIS STACK.
+#
+# It was the primary model-selection candidate - 161M params, 8192 tokens via
+# ALiBi, trained on code - and on paper it should have removed our query
+# truncation entirely. It cannot be loaded. Its remote modeling code is
+# written against transformers 4.x and the pinned stack resolves
+# transformers 5.17.0 (via sentence-transformers 6.0.1). Three independent
+# breakages, found in order, each one behind the last:
+#
+#   1. config.json pins attn_implementation="torch", which 5.x rejects.
+#      Fixable - that is what the config_kwargs retry below is for.
+#   2. It needs trust_remote_code=True. Without it transformers silently
+#      loads a stock BERT, because config.json says model_type "bert" - you
+#      get a model with no ALiBi that cannot address its advertised context
+#      and no error anywhere.
+#   3. Its modeling code imports find_pruneable_heads_and_indices (removed in
+#      5.x) and reads config.is_decoder (no longer defaulted). Shimming the
+#      first surfaced the second; config_kwargs cannot reach the custom
+#      JinaBertConfig to supply it.
+#
+# We stopped there. Each shim only revealed the next breakage, and the failure
+# mode being courted is the worst one available to this project: a model that
+# loads and quietly produces wrong embeddings. Downgrading transformers is not
+# on the table - the versions are pinned and verified.
+#
+# If you want this model, the honest route is a separate, isolated environment
+# with transformers 4.x, NOT more shims here. Measured alternative in place:
+# Snowflake/snowflake-arctic-embed-m. Note also that e5-base cut query
+# truncation from 61.5% to 24.4% and gained only +1.7 points of recall@100,
+# so long context looks far less decisive here than it does on paper.
 
 
 def _load_sentence_transformer(model_name: str) -> Any:
@@ -274,13 +241,6 @@ def _load_sentence_transformer(model_name: str) -> Any:
             "code downloaded from the Hub. See _TRUST_REMOTE_CODE.", model_name,
         )
         extra["trust_remote_code"] = True
-        shimmed = _install_legacy_transformers_shims()
-        if shimmed:
-            logger.warning(
-                "Restored transformers 4.x symbols for %s: %s. See "
-                "_install_legacy_transformers_shims for why.",
-                model_name, ", ".join(shimmed),
-            )
 
     try:
         return SentenceTransformer(model_name, device=config.DEVICE, **extra)
