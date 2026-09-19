@@ -43,8 +43,8 @@ Why this shape:
 ## Setup
 
 ```bash
-git clone https://github.com/DeshnaDey/Samsung-PRISM.git
-cd Samsung-PRISM
+git clone https://github.com/DeshnaDey/SRMIST_NOVA.git
+cd SRMIST_NOVA
 ```
 
 **1. Create and activate the virtual environment** (Python 3.11):
