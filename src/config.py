@@ -17,8 +17,14 @@ parallel without fighting over the same lines. Stay inside your own section.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
+from functools import lru_cache
 from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # SHARED - paths and dataset identity (change only with team agreement)
@@ -65,6 +71,127 @@ NUM_THREADS: int | None = None
 
 
 # =============================================================================
+# SHARED - TOKEN BUDGETS (change only with team agreement)
+# =============================================================================
+#
+# WHY THESE ARE NOT CHARACTER CAPS
+# --------------------------------
+# This project used to carry MAX_SNIPPET_CHARS = 4000 and MAX_QUERY_CHARS =
+# 2000. Both were dead letters. The encoder truncates at its own token limit,
+# and for the day-one checkpoint that limit is 254 content tokens - roughly
+# 1,000 characters of Python and roughly 900 characters of English prose. A
+# 4,000-character cap can never fire: the tokenizer has already cut the text
+# to a quarter of that before the cap is consulted. The caps were denominated
+# in the wrong unit, so they measured nothing and protected nothing.
+#
+# WHY THEY RESOLVE PER-MODEL
+# --------------------------
+# The checkpoints under consideration span 254 to 8192 tokens. Hardcoding a
+# number means editing this file on every model swap and, worse, silently
+# throwing away 97% of an 8k model's window if somebody forgets. These budgets
+# therefore derive from whichever checkpoint is active.
+#
+# HOW TO READ THEM
+# ----------------
+#     config.MAX_SNIPPET_TOKENS   ->  int, budget for one corpus snippet
+#     config.MAX_QUERY_TOKENS     ->  int, budget for one query
+#
+# Both are computed on first access and cached, via the module-level
+# __getattr__ at the bottom of this file. They are attributes, not constants:
+# resolving one may consult the Hub the first time, so do not read them inside
+# a tight loop - hoist them out.
+
+#: Tokens the encoder spends on its own special tokens ([CLS]/[SEP], <s>/</s>).
+#: Subtracted from the model's window to get the usable content budget.
+SPECIAL_TOKEN_ALLOWANCE: int = 2
+
+#: Used only when a checkpoint advertises no usable limit at all.
+FALLBACK_CONTEXT_TOKENS: int = 512
+
+#: Guards against tokenizers that report a sentinel "no limit" value
+#: (transformers uses 1000000000000000019884624838656 for exactly this).
+_IMPLAUSIBLE_CONTEXT_TOKENS: int = 100_000
+
+
+@lru_cache(maxsize=16)
+def model_context_tokens(model_name: str | None = None) -> int:
+    """Return the full sequence window of ``model_name``, in tokens.
+
+    Resolution order, most authoritative first:
+
+    1. ``MAX_SEQ_LENGTH`` if it has been set explicitly - an operator override
+       always wins.
+    2. ``sentence_bert_config.json`` on the Hub. This is the file
+       SentenceTransformer itself reads to set ``max_seq_length``, so it is
+       what will actually do the truncating. A tiny JSON download, no weights.
+    3. The tokenizer's ``model_max_length``. Correct for plain transformers
+       checkpoints, but note many sentence-transformers models inherit a much
+       larger value here than the ST wrapper will really use - hence its
+       position below the file above.
+    4. ``FALLBACK_CONTEXT_TOKENS``.
+
+    Cached, so the Hub is consulted at most once per checkpoint per process.
+    Never raises: an unreachable Hub degrades to the fallback rather than
+    killing an evaluation.
+    """
+    name = model_name or DENSE_MODEL_NAME
+
+    if MAX_SEQ_LENGTH is not None:
+        return int(MAX_SEQ_LENGTH)
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        path = hf_hub_download(name, "sentence_bert_config.json")
+        value = json.loads(Path(path).read_text(encoding="utf-8")).get("max_seq_length")
+        if value and 0 < int(value) < _IMPLAUSIBLE_CONTEXT_TOKENS:
+            return int(value)
+    except Exception as exc:  # noqa: BLE001 - any failure is just a miss
+        logger.debug("No sentence_bert_config.json for %s (%s)", name, exc)
+
+    try:
+        from transformers import AutoTokenizer
+
+        value = int(AutoTokenizer.from_pretrained(name).model_max_length)
+        if 0 < value < _IMPLAUSIBLE_CONTEXT_TOKENS:
+            return value
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("No usable model_max_length for %s (%s)", name, exc)
+
+    logger.warning(
+        "Could not resolve a context window for %r; falling back to %d tokens. "
+        "If that is wrong, set MAX_SEQ_LENGTH explicitly.",
+        name, FALLBACK_CONTEXT_TOKENS,
+    )
+    return FALLBACK_CONTEXT_TOKENS
+
+
+def max_snippet_tokens(model_name: str | None = None) -> int:
+    """Token budget for one corpus snippet, for ``model_name``.
+
+    Override with ``PRISM_MAX_SNIPPET_TOKENS`` to test a deliberately tighter
+    budget than the model allows (e.g. to trade recall for encode speed).
+    """
+    override = os.environ.get("PRISM_MAX_SNIPPET_TOKENS")
+    if override:
+        return max(1, int(override))
+    return max(1, model_context_tokens(model_name) - SPECIAL_TOKEN_ALLOWANCE)
+
+
+def max_query_tokens(model_name: str | None = None) -> int:
+    """Token budget for one query, for ``model_name``.
+
+    Override with ``PRISM_MAX_QUERY_TOKENS``. Separate from the snippet budget
+    on purpose: the two sides overflow at very different rates here, so being
+    able to move one without the other is the point.
+    """
+    override = os.environ.get("PRISM_MAX_QUERY_TOKENS")
+    if override:
+        return max(1, int(override))
+    return max(1, model_context_tokens(model_name) - SPECIAL_TOKEN_ALLOWANCE)
+
+
+# =============================================================================
 # WORKSTREAM 1 - query preprocessing              (owner: query)
 # =============================================================================
 
@@ -83,12 +210,17 @@ QUERY_CATEGORIES: tuple[str, ...] = (
 )
 
 #: Drop queries shorter than this after cleaning (characters).
+#: Characters are the right unit here - this is a "did cleaning destroy the
+#: query" guard, not a context-window budget.
 #: PLACEHOLDER
 MIN_QUERY_CHARS: int = 3
 
-#: Hard cap on query length handed to the encoder (characters, pre-tokenization).
-#: PLACEHOLDER
-MAX_QUERY_CHARS: int = 2_000
+#: Hard cap on query length handed to the encoder, in TOKENS.
+#: Resolved per-model - see ``max_query_tokens()`` and the TOKEN BUDGETS block
+#: in the shared section. Read it as ``config.MAX_QUERY_TOKENS``.
+#:
+#: Queries are where this actually bites: 61.9% of them overflow the current
+#: model's window, against 23.5% of snippets (data/inspection_report.md).
 
 
 # =============================================================================
@@ -97,10 +229,14 @@ MAX_QUERY_CHARS: int = 2_000
 
 ENABLE_SNIPPET_PREPROCESSING: bool = False
 
-#: Truncate snippets to this many characters before encoding. APPS solutions
-#: are long and the bi-encoder context window is short, so this matters.
-#: PLACEHOLDER - measure before trusting.
-MAX_SNIPPET_CHARS: int = 4_000
+#: Truncate snippets to this many TOKENS before encoding.
+#: Resolved per-model - see ``max_snippet_tokens()`` and the TOKEN BUDGETS
+#: block in the shared section. Read it as ``config.MAX_SNIPPET_TOKENS``.
+#:
+#: MEASURED (data/inspection_report.md): 23.5% of snippets overflow the current
+#: model's 254-token content window, median 132 tokens. Real, but it is the
+#: SMALLER of the two truncation problems - queries overflow 61.9% of the time,
+#: roughly 2.6x as often. Spend effort on the query side first.
 
 #: Strip comments/docstrings from code before encoding.
 #: PLACEHOLDER - may help (less noise) or hurt (comments carry NL signal). Test it.
@@ -214,6 +350,36 @@ SMOKE_TEST_QUERY_LIMIT: int | None = None
 RELEASE_TAG: str = "PRISM_GENAI_HACKATHON_Y2026"
 
 
+def __getattr__(name: str) -> Any:
+    """Resolve the per-model token budgets on first attribute access.
+
+    PEP 562 module ``__getattr__``. It exists so the budgets can be READ like
+    the plain constants they replaced::
+
+        if n_tokens > config.MAX_SNIPPET_TOKENS: ...
+
+    while still being derived from whichever checkpoint ``DENSE_MODEL_NAME``
+    currently names. Writing them as real module constants would mean either
+    hardcoding a number (wrong the moment we swap models) or consulting the
+    Hub at import time (which would make ``import config`` do network I/O).
+
+    Also catches the two deleted names and says what to use instead, rather
+    than letting a stale reference fail as a bare AttributeError.
+    """
+    if name == "MAX_SNIPPET_TOKENS":
+        return max_snippet_tokens()
+    if name == "MAX_QUERY_TOKENS":
+        return max_query_tokens()
+    if name in ("MAX_SNIPPET_CHARS", "MAX_QUERY_CHARS"):
+        replacement = name.replace("_CHARS", "_TOKENS")
+        raise AttributeError(
+            f"config.{name} was removed: it was a character cap on a limit the "
+            f"tokenizer enforces in tokens, so it never fired. Use "
+            f"config.{replacement}, which resolves from the active model."
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def ensure_dirs() -> None:
     """Create the scratch directories this config points at.
 
@@ -247,4 +413,9 @@ def describe() -> dict[str, object]:
         "normalize_embeddings": NORMALIZE_EMBEDDINGS,
         "seed": RANDOM_SEED,
         "smoke_limit": SMOKE_TEST_QUERY_LIMIT,
+        # Resolved from the active checkpoint, so a results file records the
+        # budget that actually applied rather than a constant someone guessed.
+        "model_context_tokens": model_context_tokens(),
+        "max_snippet_tokens": max_snippet_tokens(),
+        "max_query_tokens": max_query_tokens(),
     }

@@ -1,11 +1,20 @@
 """Snippet normalization.  (owner: corpus)
 
-APPS solutions are long, competition-style Python programs. The bi-encoder's
-context window is short, so what we keep and what we throw away here has a
-large effect on NDCG - larger, usually, than the choice of fusion strategy.
+APPS solutions are competition-style Python programs, and the bi-encoder's
+context window is short, so what we keep here does affect NDCG.
+
+But calibrate the effort - MEASURED, see data/inspection_report.md:
+
+    snippets over the 254-token window   23.5%   (median  132 tokens)
+    QUERIES  over the 254-token window   61.9%   (median  314 tokens)
+
+Most snippets already fit. The truncation problem is overwhelmingly on the
+query side, roughly 2.6x as often, and that is stage 1's territory
+(src/query/preprocess.py), not this file's. An earlier version of this
+docstring had it the other way round.
 
 Ideas worth measuring (log each in experiments.md):
-  - truncate to config.MAX_SNIPPET_CHARS (head? tail? head+signature?)
+  - truncate to config.MAX_SNIPPET_TOKENS (head? tail? head+signature?)
   - strip comments/docstrings (config.STRIP_COMMENTS) - may remove noise, may
     remove the only natural-language bridge to the query. Test, don't assume.
   - keep function/class signatures and hoist them to the front
@@ -54,8 +63,10 @@ class PrismSnippetProcessor(SnippetProcessor):
     def __init__(self) -> None:
         # TODO(corpus): set up whatever the transform needs (an AST-based
         # comment stripper, a tokenizer for length-aware truncation, ...).
-        # Prefer tokenizer-aware truncation over character counts if you can
-        # afford it - config.MAX_SNIPPET_CHARS is a crude proxy.
+        # Truncate in TOKENS, against config.MAX_SNIPPET_TOKENS, using the
+        # tokenizer of config.DENSE_MODEL_NAME. The old character cap was a
+        # proxy so crude it never fired: 4,000 chars against a limit the
+        # tokenizer enforces at ~1,000 chars' worth of Python.
         pass
 
     def process(self, snippet: Snippet) -> ProcessedSnippet:

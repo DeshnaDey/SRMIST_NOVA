@@ -84,8 +84,11 @@ def test_get_snippet_processor_respects_config(
 
 
 @pytest.mark.skip(reason="TODO(corpus): implement PrismSnippetProcessor")
-def test_truncates_to_max_snippet_chars() -> None:
-    """Long snippets are cut to config.MAX_SNIPPET_CHARS."""
+def test_truncates_to_max_snippet_tokens() -> None:
+    """Long snippets are cut to config.MAX_SNIPPET_TOKENS.
+
+    Measured with the tokenizer of config.DENSE_MODEL_NAME.
+    """
 
 
 @pytest.mark.skip(reason="TODO(corpus): implement comment stripping")

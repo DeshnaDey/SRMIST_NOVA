@@ -209,6 +209,21 @@ CPU-only constraints, but has not been built or tested yet.
 
 ### The two files that matter most
 
+### What the data actually looks like
+
+Before tuning anything, read [`data/inspection_report.md`](data/inspection_report.md)
+(regenerate with `python scripts/inspect_data.py`). The three findings that most
+often get assumed wrong:
+
+- Queries are **full competitive-programming problem statements** (~1,050 chars
+  median), not short natural-language asks.
+- **Truncation is a query-side problem.** 61.9% of queries overflow the current
+  model's 254-token window, against 23.5% of snippets — roughly 2.6x. Budgets are
+  denominated in tokens (`config.MAX_QUERY_TOKENS` / `MAX_SNIPPET_TOKENS`) and
+  resolve from whichever checkpoint is active.
+- There is **exactly one relevant document per query**, so NDCG@10 and MRR are
+  monotonically related and will move together.
+
 **`src/config.py`** — every model name, top-k, batch size and feature flag.
 A result is reproducible from a git SHA because everything that shapes it is
 here. Values marked `# PLACEHOLDER` are unvalidated guesses; replace them with

@@ -107,5 +107,9 @@ def test_category_is_from_the_known_taxonomy() -> None:
 
 
 @pytest.mark.skip(reason="TODO(query): implement PrismQueryProcessor")
-def test_respects_max_query_chars() -> None:
-    """Output honours config.MAX_QUERY_CHARS."""
+def test_respects_max_query_tokens() -> None:
+    """Output honours config.MAX_QUERY_TOKENS.
+
+    A TOKEN budget resolved from the active checkpoint, measured with that
+    model's tokenizer - not a character count.
+    """
