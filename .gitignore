@@ -41,6 +41,7 @@ sentence_transformers_cache/
 # directory is excluded, so the negation below only works with the glob.
 data/*
 !data/.gitkeep
+!data/inspection_report.md
 *.faiss
 *.index
 *.npy
