@@ -172,6 +172,30 @@ Fast smoke run while developing (**not a reportable score**):
 python scripts/run_eval.py --pipeline baseline --limit 50
 ```
 
+### The iteration loop
+
+Experiment on **train**; keep **test** for confirming a winner, once.
+
+```bash
+python scripts/run_eval.py --pipeline baseline --split train            # full train
+python scripts/run_eval.py --pipeline baseline --split train --limit 50 # fast probe
+```
+
+`--limit` samples deterministically from `config.RANDOM_SEED`, so two runs over
+the same split and limit see the identical subset and a model-vs-model delta is
+a real delta. It narrows the queries and their qrels together and leaves the
+corpus at full size. `--limit` runs print `SMOKE RUN, not reportable` and never
+earn an `experiments.md` row.
+
+> **Train and test are not interchangeable.** Test is markedly harder: 89.0% of
+> test queries exceed a 254-token window against 61.9% of train, and its gold
+> snippets are longer too. Expect absolute scores to drop when you confirm on
+> test — compare models to each other within a split, never across splits.
+
+> **Never filter the corpus on the `partition` column.** It labels each snippet
+> `train`/`test`, and every query's gold doc sits in its own partition, so
+> filtering on it shrinks the candidate pool and manufactures a large fake gain.
+
 Both write **`appsretrieval_results.json`** and print NDCG@10 / MRR. Copy those
 into [`experiments.md`](experiments.md) with what you changed.
 
