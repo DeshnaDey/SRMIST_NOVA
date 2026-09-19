@@ -91,8 +91,32 @@ print('OK', mteb.__version__)"
 pytest -m "not slow"
 ```
 
-Expect `32 passed, 53 skipped`. The skips are unimplemented stubs; the passes
+Expect `38 passed, 53 skipped, 2 deselected`. The skips are unimplemented stubs; the passes
 include regression tests that pin the MTEB v2 API surface.
+
+### macOS: keep the venv off iCloud Drive
+
+If this repo lives under `~/Desktop` or `~/Documents` **and** iCloud "Desktop &
+Documents" sync is on, `fileproviderd` will churn through the ~1.6 GB virtual
+environment continuously. Measured on this project: `import mteb` never
+completed in 7+ minutes, at 0% CPU, because every read was blocking on the
+iCloud file provider.
+
+Put the venv outside the synced tree and symlink it back:
+
+```bash
+python3.11 -m venv ~/.prism/venv
+~/.prism/venv/bin/python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+~/.prism/venv/bin/python -m pip install -r requirements.txt
+ln -s ~/.prism/venv .venv        # so `source .venv/bin/activate` still works
+```
+
+After the move the same import takes ~110 s cold and a few seconds warm.
+
+The Hugging Face cache defaults to `~/.cache/huggingface`, which is already
+outside the synced tree — leave `PRISM_HF_CACHE` unset unless you have a
+reason. If you enable `ENABLE_EMBEDDING_CACHE`, point `PRISM_DATA_DIR` somewhere
+unsynced too; the embedding cache grows fast and is pure build output.
 
 ### Pinned versions
 
