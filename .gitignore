@@ -43,6 +43,7 @@ data/*
 !data/.gitkeep
 !data/inspection_report.md
 !data/model_benchmark.json
+!data/bm25_diagnostic.json
 *.faiss
 *.index
 *.npy

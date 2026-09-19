@@ -1,0 +1,57 @@
+{
+  "split": "train",
+  "top_k": 100,
+  "n_queries": 5000,
+  "model": "Snowflake/snowflake-arctic-embed-m",
+  "bm25": {
+    "recall_at_100": 0.4224,
+    "recall_at_10": 0.2368,
+    "index_seconds": 0.9,
+    "search_seconds": 3.4,
+    "ms_per_query": 0.68
+  },
+  "dense": {
+    "recall_at_100": 0.687,
+    "recall_at_10": 0.5458,
+    "corpus_encode_seconds": 117.0,
+    "query_encode_seconds": 93.4
+  },
+  "complementarity": {
+    "both_hit": 1979,
+    "bm25_only": 133,
+    "dense_only": 1456,
+    "neither": 1432,
+    "union_ceiling": 0.7136,
+    "headroom_over_dense": 0.0266
+  },
+  "dense_recall_by_query_length": [
+    {
+      "bucket": "0-510 tokens",
+      "truncated": false,
+      "n": 3770,
+      "share": 0.754,
+      "dense_recall_at_100": 0.7493
+    },
+    {
+      "bucket": "510-1020 tokens",
+      "truncated": true,
+      "n": 1098,
+      "share": 0.2196,
+      "dense_recall_at_100": 0.4827
+    },
+    {
+      "bucket": "1020-2040 tokens",
+      "truncated": true,
+      "n": 122,
+      "share": 0.0244,
+      "dense_recall_at_100": 0.5902
+    },
+    {
+      "bucket": "2040-inf tokens",
+      "truncated": true,
+      "n": 10,
+      "share": 0.002,
+      "dense_recall_at_100": 0.8
+    }
+  ]
+}
