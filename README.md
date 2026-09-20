@@ -249,6 +249,10 @@ CPU-only constraints, but has not been built or tested yet.
 
 ### The two files that matter most
 
+> **New to this repo? Read [`guide.md`](guide.md) first.** It carries what is
+> already settled, the silent failure modes, what has been ruled out with
+> numbers, and what to work on next — most of which was expensive to learn.
+
 ### What the data actually looks like
 
 Before tuning anything, read [`data/inspection_report.md`](data/inspection_report.md)
