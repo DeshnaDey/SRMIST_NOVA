@@ -296,6 +296,8 @@ CPU-only constraints, but has not been built or tested yet.
 > **New to this repo? Read [`guide.md`](guide.md) first.** It carries what is
 > already settled, the silent failure modes, what has been ruled out with
 > numbers, and what to work on next — most of which was expensive to learn.
+> [`TECH_STACK.md`](TECH_STACK.md) covers the component choices; read its
+> status banner first, since two of its recommendations were superseded.
 
 ### What the data actually looks like
 

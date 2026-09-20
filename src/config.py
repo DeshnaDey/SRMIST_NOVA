@@ -375,6 +375,20 @@ SMOKE_TEST_QUERY_LIMIT: int | None = None
 RELEASE_TAG: str = "PRISM_GENAI_HACKATHON_Y2026"
 
 
+# =============================================================================
+# DEMO / EXPLORATORY HOOKS                        (owner: query, from shanavi-work)
+# =============================================================================
+# Default-off toggles carried over from shanavi-work so that workstream is not
+# blocked. Neither is implemented yet; both are no-ops while False.
+
+#: AST-based structural analysis of snippets, for the demo.
+ENABLE_AST_DEMO: bool = False
+
+#: Expand a query with generated paraphrases before retrieval.
+ENABLE_QUERY_EXPANSION: bool = False
+QUERY_EXPANSION_MODEL: str = "google/flan-t5-small"
+
+
 def __getattr__(name: str) -> Any:
     """Resolve the per-model token budgets on first attribute access.
 
@@ -440,6 +454,14 @@ def describe() -> dict[str, object]:
         "smoke_limit": SMOKE_TEST_QUERY_LIMIT,
         # Resolved from the active checkpoint, so a results file records the
         # budget that actually applied rather than a constant someone guessed.
+        # Carried over from shanavi-work: these shape a run and belong in the
+        # record, so a results file is reproducible from the file alone.
+        "max_seq_length": MAX_SEQ_LENGTH,
+        "encoder_window_cap": ENCODER_WINDOW_CAP,
+        "faiss_index_factory": FAISS_INDEX_FACTORY,
+        "cache_version": CACHE_VERSION if ENABLE_EMBEDDING_CACHE else None,
+        "ast_demo": ENABLE_AST_DEMO,
+        "query_expansion": ENABLE_QUERY_EXPANSION,
         "model_context_tokens": model_context_tokens(),
         "max_snippet_tokens": max_snippet_tokens(),
         "max_query_tokens": max_query_tokens(),
