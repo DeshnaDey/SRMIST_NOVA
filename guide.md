@@ -19,7 +19,7 @@ Companion docs: [`README.md`](README.md) (setup + architecture),
 | Pipeline | Bare bi-encoder. Every stage is still a no-op passthrough. |
 | Cost | ~26 min full test run · ~4 min with all-MiniLM |
 
-**The bottleneck is recall, not ranking.** One gold doc per query, and it is
+**The bottleneck is recall, and it is in the encoder.** One gold doc per query, and it is
 outside the top 100 for ~69% of test queries. A cross-encoder reranker cannot
 recover a document retrieval never surfaced, so work that only reorders the top
 10 cannot move the headline number. Raise recall@100 first.
@@ -64,6 +64,8 @@ python scripts/inspect_data.py                                    # regenerate d
 python scripts/benchmark_models.py --list
 python scripts/benchmark_models.py --model arctic-m --split train
 python scripts/bm25_diagnostic.py --split train
+python scripts/truncation_probe.py --split train          # causal truncation probe
+python scripts/truncation_probe.py --split test --out data/truncation_probe_test.json
 pytest -m "not slow"                                              # 38 passed, 53 skipped
 ```
 
@@ -145,6 +147,7 @@ Do not redo these. Full reasoning is in the `experiments.md` decision log.
 | **jina-v2-base-code** | **Unusable** | Three stacked transformers 4.x/5.x breakages. Its remote code needs `find_pruneable_heads_and_indices` (removed in 5.x) and `config.is_decoder` (no longer defaulted); `config_kwargs` cannot reach the custom config. Needs an isolated transformers 4.x env, not more shims. |
 | **Qodo-Embed-1-1.5B** | **Impractical** | 6.17 GB of fp32 weights and ~4–5 h per run on an 8 GB box. |
 | **Longer context as the lever** | **Weak** | e5 cut query truncation 61.5% → 24.4% for **+1.7 points of recall@100**, recall@10 flat, at 7.6× the encode cost. |
+| **Query compression** | **Dropped** | Causal probe, **train and test**: cutting 25% off a fitting query's tail — a *stronger* cut than the ~80% real truncated queries keep — moves recall@100 **+0.002** (train) and **+0.0018** (test). You must delete half a query to lose a point. The 27-point fits-vs-truncated gap is length-as-difficulty, not truncation: untruncated queries alone run 0.894 (0–127 tok) down to 0.545 (382–510 tok). |
 | **Stripping boilerplate query prefixes** | **Dropped** | Premise was false: no shared prefix exists (2.0%, not "every query"). |
 | **Published CoIR numbers as a guide** | **Unreliable here** | bge beat e5 on our data (NDCG@10 0.456 vs 0.437) while CoIR reports e5 11.52 vs bge 4.05. Likely CoIR used bge v1.0, not v1.5. |
 
@@ -152,23 +155,33 @@ Do not redo these. Full reasoning is in the `experiments.md` decision log.
 
 ## 6. What to do next
 
-**First, and cheaply: the causal probe.** Queries that fit the 510-token window
-score recall@100 **0.7493**; those just over it score **0.4827**. That 27-point
-gap is *correlational* — longer problems may simply be harder. Artificially
-truncate queries that currently **fit** and measure whether recall actually
-falls. Corpus embeddings are already cached, so this is minutes.
+**The causal probe is done, and it closed the query-side lever.** Queries that
+fit the 510-token window score recall@100 0.7493; those just over it score
+0.4827. That 27-point gap is *not* truncation. Artificially truncating the
+3,770 queries that fit shows recall is flat at the dose reality inflicts —
+real truncated queries keep a median 79.4% of themselves, and a *harder* 75%
+cut moves recall **+0.002**. Half a query has to go before one point does.
+**Confirmed on test**, where 41.2% of queries truncate against train's 24.6%:
+the 75% arm moves **+0.0018** there (control 0.33062 → 0.33243). The split
+where compression would have to pay is the split that says it does not.
+Full numbers in `experiments.md`'s Decision log, `data/truncation_probe.json`
+and `data/truncation_probe_test.json`; rerun with
+`python scripts/truncation_probe.py --split train` (arms are cached, so a
+rerun is seconds).
 
-This one probe decides the next two weeks:
+What the gap actually is: length-as-difficulty. Among queries that all fit
+entirely, with nothing cut anywhere, recall@100 runs **0.894** (0–127 tok),
+0.830, 0.710, **0.545** (382–510 tok). The untruncated 382–510 bucket is
+already near the truncated bucket's 0.483. Longer competitive-programming
+statements are harder problems, and that is most of what the stratification
+was showing.
 
-- **If truncation is causal** → build query compression: drop the Input/Output
-  format sections and worked examples, keep the narrative problem core. Test
-  truncates 41.2% of queries, so the graded split benefits most. Note the
-  honest ceiling: re-weighting train's per-bucket recalls to test's length
-  distribution explains only **~4.8 of the 38-point train→test drop**, so this
-  is worth points, not a transformation.
-- **If it is not causal** → the headroom is inside the encoder, not in what we
-  feed it. Then look at fine-tuning or hard-negative mining on the train split,
-  which is the only remaining lever big enough to matter.
+**So the headroom is inside the encoder, not in what we feed it.** The next
+lever worth two weeks is fine-tuning or hard-negative mining on the train
+split — 5,000 pairs, one gold doc each. Reshaping the input is spent: the
+encoder demonstrably does not use a query's later tokens, so neither
+compression nor a longer context can pay (consistent with e5's +1.7 points
+for cutting truncation 61.5% → 24.4%).
 
 **Also unmeasured and cheap:** `meta_information.starter_code` is populated on
 every corpus row and we index `text` only — real content the retriever never

@@ -1,0 +1,188 @@
+{
+  "probe": "causal truncation",
+  "split": "test",
+  "top_k": 100,
+  "model": "Snowflake/snowflake-arctic-embed-m",
+  "query_token_budget": 510,
+  "smoke_run": false,
+  "seed": 42,
+  "n_fitting_queries": 2214,
+  "harness_check": {},
+  "observed_truncation": {
+    "n_truncated": 1551,
+    "median_retention_ratio_all_truncated": 0.7932,
+    "median_retention_ratio_510_1020_bucket": 0.8057
+  },
+  "arms": [
+    {
+      "retention_ratio": 1.0,
+      "n": 2214,
+      "median_tokens_kept": 363,
+      "recall_at_100": 0.33062,
+      "recall_at_10": 0.14228,
+      "median_gold_rank": 367,
+      "encode_seconds": 377.6,
+      "by_original_length": [
+        {
+          "bucket": "0-127 tokens",
+          "n": 40,
+          "recall_at_100": 0.575
+        },
+        {
+          "bucket": "127-255 tokens",
+          "n": 383,
+          "recall_at_100": 0.42298
+        },
+        {
+          "bucket": "255-382 tokens",
+          "n": 825,
+          "recall_at_100": 0.33939
+        },
+        {
+          "bucket": "382-510 tokens",
+          "n": 966,
+          "recall_at_100": 0.2764
+        }
+      ],
+      "delta_vs_control": 0.0,
+      "queries_lost_vs_control": 0,
+      "queries_gained_vs_control": 0
+    },
+    {
+      "retention_ratio": 0.75,
+      "n": 2214,
+      "median_tokens_kept": 273,
+      "recall_at_100": 0.33243,
+      "recall_at_10": 0.14318,
+      "median_gold_rank": 361,
+      "encode_seconds": 281.7,
+      "by_original_length": [
+        {
+          "bucket": "0-127 tokens",
+          "n": 40,
+          "recall_at_100": 0.55
+        },
+        {
+          "bucket": "127-255 tokens",
+          "n": 383,
+          "recall_at_100": 0.41514
+        },
+        {
+          "bucket": "255-382 tokens",
+          "n": 825,
+          "recall_at_100": 0.33333
+        },
+        {
+          "bucket": "382-510 tokens",
+          "n": 966,
+          "recall_at_100": 0.28986
+        }
+      ],
+      "delta_vs_control": 0.00181,
+      "queries_lost_vs_control": 46,
+      "queries_gained_vs_control": 50
+    },
+    {
+      "retention_ratio": 0.5,
+      "n": 2214,
+      "median_tokens_kept": 182,
+      "recall_at_100": 0.2972,
+      "recall_at_10": 0.12466,
+      "median_gold_rank": 470,
+      "encode_seconds": 195.9,
+      "by_original_length": [
+        {
+          "bucket": "0-127 tokens",
+          "n": 40,
+          "recall_at_100": 0.475
+        },
+        {
+          "bucket": "127-255 tokens",
+          "n": 383,
+          "recall_at_100": 0.37598
+        },
+        {
+          "bucket": "255-382 tokens",
+          "n": 825,
+          "recall_at_100": 0.29697
+        },
+        {
+          "bucket": "382-510 tokens",
+          "n": 966,
+          "recall_at_100": 0.2588
+        }
+      ],
+      "delta_vs_control": -0.03342,
+      "queries_lost_vs_control": 144,
+      "queries_gained_vs_control": 70
+    },
+    {
+      "retention_ratio": 0.25,
+      "n": 2214,
+      "median_tokens_kept": 91,
+      "recall_at_100": 0.229,
+      "recall_at_10": 0.08175,
+      "median_gold_rank": 725,
+      "encode_seconds": 114.0,
+      "by_original_length": [
+        {
+          "bucket": "0-127 tokens",
+          "n": 40,
+          "recall_at_100": 0.475
+        },
+        {
+          "bucket": "127-255 tokens",
+          "n": 383,
+          "recall_at_100": 0.33681
+        },
+        {
+          "bucket": "255-382 tokens",
+          "n": 825,
+          "recall_at_100": 0.24
+        },
+        {
+          "bucket": "382-510 tokens",
+          "n": 966,
+          "recall_at_100": 0.16667
+        }
+      ],
+      "delta_vs_control": -0.10162,
+      "queries_lost_vs_control": 296,
+      "queries_gained_vs_control": 71
+    },
+    {
+      "retention_ratio": 0.1,
+      "n": 2214,
+      "median_tokens_kept": 37,
+      "recall_at_100": 0.14408,
+      "recall_at_10": 0.04652,
+      "median_gold_rank": 1449,
+      "encode_seconds": 42.8,
+      "by_original_length": [
+        {
+          "bucket": "0-127 tokens",
+          "n": 40,
+          "recall_at_100": 0.15
+        },
+        {
+          "bucket": "127-255 tokens",
+          "n": 383,
+          "recall_at_100": 0.22715
+        },
+        {
+          "bucket": "255-382 tokens",
+          "n": 825,
+          "recall_at_100": 0.15394
+        },
+        {
+          "bucket": "382-510 tokens",
+          "n": 966,
+          "recall_at_100": 0.10248
+        }
+      ],
+      "delta_vs_control": -0.18654,
+      "queries_lost_vs_control": 467,
+      "queries_gained_vs_control": 54
+    }
+  ]
+}
