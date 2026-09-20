@@ -75,6 +75,13 @@ class BaselineEncoder(_AbsEncoder):  # type: ignore[misc,valid-type]
             # corpus has a 60,599-token outlier against a p99 of 1,023, so a
             # long-context checkpoint can spend most of the encode on a
             # handful of documents. Never RAISES the window - only lowers it.
+            # NOTE: aleesha-work also carried a _truncate_long_texts() helper
+            # that cut the text strings inside encode(). It is deliberately not
+            # merged: this cap already makes the tokenizer truncate once, and
+            # doing it again on the string would cut more than either approach
+            # intends, with no test covering the interaction. Recover it from
+            # origin/aleesha-work (a73ff64) if the window cap ever proves
+            # insufficient.
             cap = config.ENCODER_WINDOW_CAP
             current = getattr(self._model, "max_seq_length", None)
             if cap is not None and current and current > cap:
@@ -146,6 +153,7 @@ class BaselineEncoder(_AbsEncoder):  # type: ignore[misc,valid-type]
         prefix = _prefix_for(prompt_type)
         if prefix:
             texts = [f"{prefix}{t}" for t in texts]
+
 
         embeddings = self.model.encode(
             texts,

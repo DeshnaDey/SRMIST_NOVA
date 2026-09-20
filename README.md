@@ -215,6 +215,50 @@ earn an `experiments.md` row.
 Both write **`appsretrieval_results.json`** and print NDCG@10 / MRR. Copy those
 into [`experiments.md`](experiments.md) with what you changed.
 
+### Dataset verification and evaluation contract
+
+This project uses the official MTEB AppsRetrieval task backed by the Hugging
+Face dataset `CoIR-Retrieval/apps`.
+
+The expected dataset shape is approximately:
+
+- ~8.77k corpus entries (Python solution snippets)
+- ~8.77k natural-language queries
+- ~5k training examples for development / tuning
+- ~3.77k test examples for official evaluation
+
+The MTEB task loads the corpus, queries, and qrels through the task metadata,
+then evaluates on the task's official test split. The train split may be used
+for local development and hyperparameter tuning, but the evaluation result must
+remain measured on the held-out test split rather than fitting on the test qrels.
+
+The dataset is APPS-style: natural-language problem statements become the query
+texts, and the corpus contains Python solution snippets for those problems.
+This is the exact retrieval setting for the challenge: a query asks for a coding
+solution or algorithmic pattern, and the model ranks likely matching snippets.
+
+The official metric reporting for AppsRetrieval is:
+
+- NDCG@10
+- MRR@10
+
+The baseline evaluation in this repo is intentionally minimal: it uses the
+MTEB-compatible bare bi-encoder and does not touch the team architecture for
+BM25, FAISS, fusion, or reranking. The aim is to keep the baseline stable while
+checking the dataset and evaluation pipeline end-to-end.
+
+### Long-code handling
+
+APPS solutions can exceed the usual 512-token window of generic sentence models.
+The baseline encoder includes a lightweight safeguard: inputs are truncated to a
+safe token cap before embedding, without changing the retrieval pipeline or the
+team's architecture. This is a minimal guard to avoid pathological failures on
+long Python solutions while keeping the retrieval stack unchanged.
+
+The dataset is small enough for CPU execution with NumPy and FAISS in a local
+or lab environment. The dominant runtime constraint is embedding and reranking on
+CPU, not the dataset size itself.
+
 ### Docker (stub)
 
 ```bash
