@@ -2,6 +2,12 @@
 
 **Samsung PRISM GenAI Hackathon 2026 · Theme 1**
 
+> **Naming.** *Samsung PRISM / PRISM GenAI* is the **programme**; **`SRMIST_NOVA`**
+> is the **team** (CollegeName_TeamName), and it is the repository and release
+> name. The `PRISM` in this project's module names refers to the programme's
+> theme, not to the team. Do not rename the repository — `origin` is already
+> [`DeshnaDey/SRMIST_NOVA`](https://github.com/DeshnaDey/SRMIST_NOVA).
+
 Natural-language retrieval over code. Given a query in plain English and a
 corpus of code snippets, rank the snippets by relevance.
 
@@ -10,7 +16,8 @@ corpus of code snippets, rank the snippets by relevance.
 - **Metrics:** NDCG@10 (headline) and MRR
 - **Constraint:** CPU only. Nothing in this project may request a GPU.
 - **Python:** 3.11
-- **Release tag:** `PRISM_GENAI_HACKATHON_Y2026` _(not yet tagged — see [Submission](#submission))_
+- **Team:** `SRMIST_NOVA` (CollegeName_TeamName)
+- **Release tag:** `PRISM_GENAI_HACKATHON_Y2026` _(see [Submission](#submission))_
 
 ---
 
@@ -405,6 +412,6 @@ too — they stop the next person retrying the same idea at 3am.
 - [ ] Tag the release:
 
 ```bash
-git tag -a PRISM_GENAI_HACKATHON_Y2026 -m "Samsung PRISM GenAI Hackathon 2026 submission"
+git tag -a PRISM_GENAI_HACKATHON_Y2026 -m "SRMIST_NOVA — Samsung PRISM GenAI Hackathon 2026 submission"
 git push origin PRISM_GENAI_HACKATHON_Y2026
 ```

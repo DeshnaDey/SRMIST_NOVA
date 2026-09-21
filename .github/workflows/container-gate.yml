@@ -1,0 +1,138 @@
+# Phase-3 container gate.
+#
+# This runs the half of the repro gate that cannot be run on the dev machine
+# (no Docker daemon there). It is the "works on my laptop" check: the local
+# offline run already proved the PIPELINE needs no network, but it could not
+# prove the IMAGE - that the pinned wheels resolve on linux/amd64, that the
+# build-time prefetch populates the very cache the runtime reads, and that
+# CMD produces the submission artifact rather than something weaker.
+#
+# The job fails loudly on: a build error, a missing/unresolvable wheel, any
+# Hub access at runtime, a red test suite, or an artifact that does not
+# reproduce the locked numbers bit-for-bit.
+
+name: container-gate
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  container-gate:
+    # CPU-only by construction. Never a GPU runner: the graded environment
+    # has no GPU and this project is pinned to CPU torch.
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # The locked artifact is the thing the container output is diffed
+      # against, so read its numbers BEFORE building - if it is missing or
+      # malformed, fail now rather than after an hour of work.
+      - name: Read the locked submission artifact
+        id: locked
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee -a "$GITHUB_OUTPUT"
+          import json, pathlib, sys
+          path = pathlib.Path("appsretrieval_results.json")
+          if not path.exists():
+              sys.exit("FAIL: appsretrieval_results.json is missing")
+          payload = json.loads(path.read_text())
+          if payload.get("pipeline") != "full" or payload.get("split") != "test" \
+                  or payload.get("smoke_run") is not False:
+              sys.exit(f"FAIL: locked artifact is not a full/test/unlimited run: "
+                       f"pipeline={payload.get('pipeline')} "
+                       f"split={payload.get('split')} "
+                       f"smoke_run={payload.get('smoke_run')}")
+          scores = payload["results"]["task_results"][0]["scores"]["test"][0]
+          for metric in ("ndcg_at_10", "mrr_at_10", "recall_at_100"):
+              print(f"{metric}={scores[metric]!r}")
+          PY
+
+      - name: Build the image
+        run: |
+          set -euo pipefail
+          # --pull so a stale local base image cannot mask a broken FROM, and
+          # --progress=plain so a failing pip resolve is readable in the log.
+          docker build --pull --progress=plain -t prism-retrieval:gate .
+
+      # Structural proof that nothing reaches the Hub: the container is given
+      # NO network interface at all. HF_HUB_OFFLINE and friends are already
+      # baked into the image; --network none means that even if they were
+      # unset, a download could not succeed. If the build-time prefetch does
+      # not cover what the runtime loads, this step fails.
+      - name: Offline sanity - model and dataset load with no network
+        run: |
+          set -euo pipefail
+          docker run --rm --network none prism-retrieval:gate \
+            python scripts/prefetch_assets.py --verify-only
+
+      - name: Test suite inside the container (offline)
+        run: |
+          set -euo pipefail
+          docker run --rm --network none prism-retrieval:gate \
+            python -m pytest -m "not slow" -q
+
+      # The real gate: the image's own CMD, offline, on the full test split.
+      - name: Full test-split run inside the container (offline)
+        run: |
+          set -euo pipefail
+          mkdir -p ci-results
+          # The results dir must be writable by the container's user.
+          chmod 777 ci-results
+          docker run --rm --network none \
+            -v "$PWD/ci-results:/app/results" \
+            prism-retrieval:gate
+
+      - name: Diff the container output against the locked artifact
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          produced = pathlib.Path("ci-results/appsretrieval_results.json")
+          if not produced.exists():
+              sys.exit("FAIL: the container produced no artifact in the mount. "
+                       "Check CMD --output and the volume path.")
+
+          locked = json.loads(pathlib.Path("appsretrieval_results.json").read_text())
+          fresh = json.loads(produced.read_text())
+
+          def scores(payload):
+              return payload["results"]["task_results"][0]["scores"]["test"][0]
+
+          # Provenance first: a smoke or baseline run can carry a plausible
+          # number, and on this stack the baseline number is IDENTICAL, so the
+          # metrics alone cannot tell them apart.
+          for field, want in (("pipeline", "full"), ("split", "test"),
+                              ("smoke_run", False)):
+              got = fresh.get(field)
+              if got != want:
+                  sys.exit(f"FAIL: container artifact {field}={got!r}, want {want!r}")
+
+          a, b = scores(locked), scores(fresh)
+          bad = []
+          for metric in ("ndcg_at_10", "mrr_at_10", "recall_at_100", "main_score"):
+              if a[metric] != b[metric]:
+                  bad.append(f"  {metric}: locked={a[metric]!r} container={b[metric]!r}")
+              else:
+                  print(f"  OK {metric}: {a[metric]!r}")
+          if bad:
+              sys.exit("FAIL: the container did not reproduce the locked artifact:\n"
+                       + "\n".join(bad))
+          print("\nContainer reproduces the locked artifact bit-for-bit.")
+          PY
+
+      - name: Upload the container-produced artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-appsretrieval-results
+          path: ci-results/appsretrieval_results.json
+          if-no-files-found: warn
