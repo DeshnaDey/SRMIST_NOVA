@@ -1,0 +1,59 @@
+{
+  "split": "test",
+  "model": "Snowflake/snowflake-arctic-embed-m",
+  "cache_version": "v1",
+  "cache_root": "/Users/deshnadey/.prism/data/embedding_cache/v1",
+  "seed": 42,
+  "arms": [
+    {
+      "arm": "cold",
+      "seconds": 695.3,
+      "cache_hits": 0,
+      "encoded": 8754,
+      "snippets": 8765,
+      "unique_keys": 8754
+    },
+    {
+      "arm": "warm",
+      "seconds": 0.7,
+      "cache_hits": 8754,
+      "encoded": 0,
+      "snippets": 8765
+    },
+    {
+      "arm": "changed",
+      "seconds": 19.6,
+      "cache_hits": 8654,
+      "encoded": 100,
+      "snippets": 8765,
+      "snippets_edited": 100
+    }
+  ],
+  "checks": [
+    {
+      "check": "warm re-embeds nothing",
+      "expected": 0,
+      "actual": 0,
+      "pass": true
+    },
+    {
+      "check": "changed re-embeds exactly the edited snippets",
+      "expected": 100,
+      "actual": 100,
+      "pass": true
+    },
+    {
+      "check": "changed leaves every other distinct snippet cached",
+      "expected": 8654,
+      "actual": 8654,
+      "pass": true
+    },
+    {
+      "check": "rebuild time tracks change size, not corpus size",
+      "expected": "changed/cold time ratio near the 1.1% changed share",
+      "actual": "2.8%",
+      "pass": true
+    }
+  ],
+  "all_passed": true
+}

@@ -207,71 +207,72 @@ def tokenize_code(text: str) -> list[str]:
     raise NotImplementedError("TODO(corpus): tokenize_code")
 
 
-def _cache_path(model_name: str) -> "Path":
-    """Where the document-vector cache for ``model_name`` lives."""
-    tag = model_name.replace("/", "__") + f"_w{config.ENCODER_WINDOW_CAP}"
-    return config.CACHE_DIR / f"{tag}_docvecs_{config.CACHE_VERSION}.npz"
+def doc_cache_extras() -> dict[str, Any]:
+    """Every encode-time flag that changes a DOCUMENT vector.
+
+    Anything that alters the output has to be in the key, or a config change
+    silently serves stale vectors - the failure the cache docstring warns
+    about. Deliberately explicit rather than clever: a false miss costs CPU,
+    a false hit corrupts the experiment log.
+    """
+    return {
+        "normalize": config.NORMALIZE_EMBEDDINGS,
+        "window_cap": config.ENCODER_WINDOW_CAP,
+        "max_seq_length": config.MAX_SEQ_LENGTH,
+        "prompt_prefix": config.DOCUMENT_PROMPT_PREFIX,
+        "side": "document",
+    }
 
 
 def _encode_cached(texts: list[str], model_name: str):
-    """Encode ``texts`` as documents, reusing a content-hash disk cache.
+    """Encode ``texts`` as documents, reusing the content-addressed cache.
 
-    Why this exists: the corpus encode is ~10 minutes of CPU and it is
-    IDENTICAL on every run, because the corpus is the same 8,765 documents in
-    the same order on both splits. Re-paying it per evaluation is the single
-    biggest avoidable cost in the loop, and DenseIndexBuilder's own build
-    outline calls for going through the embedding cache.
+    THE P1 PROPERTY THIS EXISTS FOR
+    -------------------------------
+    A rebuild after a code change must cost time proportional to WHAT
+    CHANGED, not to the size of the corpus. Each snippet is keyed by a hash
+    of its exact indexed text (plus checkpoint and every encode-time flag -
+    see ``doc_cache_extras``), so editing 100 snippets re-embeds 100
+    snippets and the other 8,665 are read from disk.
 
-    Keyed by sha1 of the exact text, namespaced by checkpoint, window cap and
-    CACHE_VERSION. Normalisation is deliberately NOT part of the key: the
-    vectors are stored exactly as the encoder returned them, and the caller
-    normalises. A cached vector can therefore only be reused for a text that
-    is byte-identical under the same checkpoint and window - which is the
-    whole correctness condition.
+    Per-entry files, not one big archive, and that is load-bearing: a single
+    .npz would have to be rewritten in full on every change, making the WRITE
+    side proportional to the corpus even when the read side is not.
 
-    Degrades to a plain encode on any cache I/O failure: a slow run beats a
-    failed one, and this box has already lost a read to an iCloud timeout.
+    Duplicate texts are deduplicated within the batch too - this corpus has
+    11 exact duplicate snippets, which would otherwise be encoded twice.
     """
     import numpy as np
 
     from src.pipeline.baseline import BaselineEncoder
+    from src.versioning.cache import get_cache
 
-    keys = [hashlib.sha1(t.encode("utf-8")).hexdigest() for t in texts]
-    cached: dict[str, Any] = {}
-    path = _cache_path(model_name)
-    if config.ENABLE_EMBEDDING_CACHE:
-        try:
-            if path.exists():
-                with np.load(path) as z:
-                    cached = {k: z[k] for k in z.files}
-                logger.info("Document vector cache: %d entries at %s",
-                            len(cached), path.name)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not read %s (%s); encoding from scratch",
-                           path, exc)
-            cached = {}
+    cache = get_cache()
+    extras = doc_cache_extras()
+    keys = [cache.make_key(t, model_name, **extras) for t in texts]
 
-    todo = {k: t for k, t in zip(keys, texts) if k not in cached}
+    vectors: dict[str, Any] = {}
+    for key in dict.fromkeys(keys):          # unique, order-preserving
+        hit = cache.get(key)
+        if hit is not None:
+            vectors[key] = hit
+
+    todo = {k: t for k, t in zip(keys, texts) if k not in vectors}
+    hits = len(texts) - len(todo)
+    logger.info("Document cache %s: %d/%d hit, %d to encode",
+                config.CACHE_VERSION, hits, len(texts), len(todo))
+
     if todo:
-        logger.info("Encoding %d/%d documents (%d served from cache)",
-                    len(todo), len(texts), len(texts) - len(todo))
         fresh = BaselineEncoder(model_name).encode(
             list(todo.values()), prompt_type="document",
             batch_size=config.BATCH_SIZE,
             normalize_embeddings=config.NORMALIZE_EMBEDDINGS,
         )
-        for k, v in zip(todo.keys(), np.asarray(fresh, dtype=np.float32)):
-            cached[k] = v
-        if config.ENABLE_EMBEDDING_CACHE:
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                np.savez(path, **cached)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Could not write %s (%s)", path, exc)
-    else:
-        logger.info("All %d document vectors served from cache", len(texts))
+        for key, vec in zip(todo.keys(), np.asarray(fresh, dtype=np.float32)):
+            vectors[key] = vec
+            cache.put(key, vec)
 
-    return np.stack([cached[k] for k in keys])
+    return np.stack([vectors[k] for k in keys])
 
 
 def _use_exact_numpy() -> bool:

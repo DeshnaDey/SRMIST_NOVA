@@ -50,6 +50,7 @@ data/*
 !data/rerank_train_dev.json
 !data/rerank_train_dev_bge.json
 !data/corpus_variants_test.json
+!data/cache_rebuild_demo.json
 *.faiss
 *.index
 *.npy

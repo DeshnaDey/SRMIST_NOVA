@@ -418,6 +418,69 @@ Not round-tripped through `validate_results.py`: this is a diagnostic and
 produces no MTEB payload. STEP 10 wires the real pipeline through
 `mteb.evaluate` and validates it there.
 
+### 2026-09-21 — P1 fast rebuild: content-hash cache, measured
+
+Run `python scripts/cache_rebuild_demo.py --split test --changed 100`; raw
+numbers in `data/cache_rebuild_demo.json`. Full corpus, 8,765 snippets.
+
+**The requirement.** A new code version must not pay to re-embed a corpus
+that mostly did not change: edit 100 snippets and the rebuild should cost
+~100 encodes, not 8,765.
+
+| arm | seconds | cache hits | encoded |
+|---|---:|---:|---:|
+| **cold** (empty cache) | **695.3** | 0 | 8,754 |
+| **warm** (nothing changed) | **0.7** | 8,754 | **0** |
+| **changed** (100 snippets edited) | **19.6** | 8,654 | **100** |
+
+All four bars pass, asserted rather than eyeballed:
+
+- warm re-embeds nothing — 0 encodes
+- changed re-embeds **exactly** the 100 edited snippets
+- changed leaves every other distinct snippet cached — 8,654
+- rebuild time tracks change size, not corpus size — **2.8%** of cold for a
+  1.1% change
+
+**Warm rebuild is ~1,000x faster than cold** (0.7 s against 11.6 min), and a
+100-snippet edit costs 19.6 s. The residual gap between 2.8% and the 1.1%
+changed share is fixed overhead — model load and reading 8,654 entries off
+disk — plus the edited snippets happening to be longer than average. It is
+overhead, not re-encoding: the encode count is exactly 100.
+
+**Design points that are load-bearing.**
+
+*One file per entry, not one archive.* A single `.npz` has to be rewritten in
+full on every change, which makes the WRITE side proportional to the corpus
+even when the read side is not — it would have failed this bar from the other
+direction. Entries are sharded by the first two hex characters of the key,
+because a flat directory of ~100k files is painfully slow to list on macOS.
+
+*Every entry is tagged with its version by construction.* Entries live under
+`CACHE_DIR/<CACHE_VERSION>/`, so versions cannot be confused for one another
+and retiring one is a directory removal rather than a scan. `CACHE_VERSION`
+is also inside the key itself.
+
+*The key covers everything that changes a vector* — exact text, checkpoint,
+`normalize`, `window_cap`, `max_seq_length`, prompt prefix and side. A false
+miss costs CPU; a false hit corrupts the experiment log.
+
+*Writes are atomic.* `np.save` to a temp file in the same directory, then
+`os.replace`. An interrupted run can leave a stray `.tmp` but never a
+half-written entry that a later run reads back as valid — and a corrupt or
+truncated entry is treated as a MISS, never an exception.
+
+**One off-by-11 worth recording.** The first run of this demo FAILED its third
+check: expected 8,665 hits, got 8,654. The cache was right and the assertion
+was wrong — this corpus contains **11 exact duplicate snippets**, which share
+a key and are encoded once, so hits are counted in unique keys while the
+expectation had been written in snippets. The check now compares like with
+like, and the dedupe is a small real saving rather than a bug.
+
+Unit coverage added for the correctness half (`tests/test_h_pipeline_e2e.py`):
+key sensitivity to text/model/version/flags, disk round-trip, corrupt entry
+degrading to a miss, and the P1 property that editing one snippet invalidates
+only that snippet. 41 passed, up from 38.
+
 ## Backlog — ideas not yet measured
 
 Move a row into the table above once it has a number next to it.

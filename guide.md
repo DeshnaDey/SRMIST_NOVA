@@ -69,6 +69,7 @@ python scripts/truncation_probe.py --split train          # causal truncation pr
 python scripts/truncation_probe.py --split test --out data/truncation_probe_test.json
 python scripts/corpus_variants.py --split train              # corpus-side levers
 python scripts/rerank_eval.py --split train --limit 300 --pool 100   # rerank + oracle
+python scripts/cache_rebuild_demo.py --split test --changed 100     # P1 rebuild proof
 pytest -m "not slow"                                              # 38 passed, 53 skipped
 ```
 
@@ -95,9 +96,13 @@ From [`data/inspection_report.md`](data/inspection_report.md):
   title+body join is marked dead at its three sites. It is kept because it is
   what keeps the baseline and SearchProtocol paths encoding byte-identical
   strings. Remove all three together or none.
-- The corpus encode is ~10 min and identical on every run, so document vectors
-  are cached by content hash (`src/corpus/index.py`). A warm cache builds the
-  index in **0.5 s** instead of 10 minutes.
+- The corpus encode is ~11.6 min cold. Document vectors are content-hash
+  cached (`src/versioning/cache.py`), so a warm rebuild is **0.7 s** and a
+  100-snippet edit costs **19.6 s** — measured, `data/cache_rebuild_demo.json`.
+  Verify with `python scripts/cache_rebuild_demo.py --split test --changed 100`.
+- **The corpus has 11 exact duplicate snippets** (8,765 rows, 8,754 distinct
+  texts). They share one cache entry. Count cache hits in unique keys, not
+  snippets, or your assertions are off by 11.
 - **Keep heavy caches off the iCloud-synced Desktop.** A 27 MB `np.load` from
   `data/` failed with `TimeoutError: [Errno 60]` mid-session. Use
   `PRISM_DATA_DIR=~/.prism/data`; the config already supports it.

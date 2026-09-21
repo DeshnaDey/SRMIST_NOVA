@@ -231,13 +231,77 @@ def test_top_ranked_restriction_is_honoured() -> None:
     """When MTEB passes top_ranked, results are restricted to those candidates."""
 
 
-@pytest.mark.skip(reason="TODO(eval): implement DiskEmbeddingCache")
-def test_cache_key_changes_with_text_model_and_version() -> None:
+def test_cache_key_changes_with_text_model_and_version(monkeypatch) -> None:
     """Any of text / model / CACHE_VERSION changing produces a different key.
 
     A key that misses one of these serves stale vectors and turns the
     experiment log into fiction.
     """
+    from src import config
+    from src.versioning.cache import make_cache_key
+
+    base = make_cache_key("def f(): pass", "model-a")
+    assert make_cache_key("def g(): pass", "model-a") != base, "text ignored"
+    assert make_cache_key("def f(): pass", "model-b") != base, "model ignored"
+    assert make_cache_key("def f(): pass", "model-a", normalize=False) != base, (
+        "encode-time flag ignored"
+    )
+
+    monkeypatch.setattr(config, "CACHE_VERSION", "v-other")
+    assert make_cache_key("def f(): pass", "model-a") != base, "version ignored"
+
+    # Same inputs must always give the same key, or entries written by one run
+    # are invisible to the next.
+    monkeypatch.setattr(config, "CACHE_VERSION", "v1")
+    assert make_cache_key("x", "m", a=1, b=2) == make_cache_key("x", "m", b=2, a=1)
+
+
+def test_disk_cache_round_trips_and_misses_cleanly(tmp_path, monkeypatch) -> None:
+    """Store/fetch works, an unknown key misses, and a corrupt entry misses."""
+    import numpy as np
+
+    from src import config
+    from src.versioning.cache import DiskEmbeddingCache
+
+    monkeypatch.setattr(config, "CACHE_VERSION", "vtest")
+    cache = DiskEmbeddingCache(tmp_path)
+
+    vec = np.arange(8, dtype=np.float32)
+    key = cache.make_key("some snippet", "model-a")
+    assert cache.get(key) is None, "empty cache must miss"
+    cache.put(key, vec)
+    np.testing.assert_array_equal(cache.get(key), vec)
+
+    # Entries are tagged with the cache version by living under it.
+    assert cache.root.name == "vtest"
+    assert cache.stats()["entries"] == 1
+
+    # A truncated entry is the signature of an interrupted run. It must cost
+    # one re-encode, not raise and kill the evaluation.
+    path = cache._path(key)
+    path.write_bytes(b"not an npy file")
+    assert cache.get(key) is None
+
+
+def test_disk_cache_only_misses_on_changed_text(tmp_path, monkeypatch) -> None:
+    """The P1 property: editing one snippet invalidates only that snippet."""
+    import numpy as np
+
+    from src import config
+    from src.versioning.cache import DiskEmbeddingCache
+
+    monkeypatch.setattr(config, "CACHE_VERSION", "vtest")
+    cache = DiskEmbeddingCache(tmp_path)
+
+    texts = [f"snippet {i}" for i in range(20)]
+    keys = [cache.make_key(t, "model-a") for t in texts]
+    for i, key in enumerate(keys):
+        cache.put(key, np.full(4, i, dtype=np.float32))
+
+    texts[7] = "snippet 7 EDITED"
+    new_keys = [cache.make_key(t, "model-a") for t in texts]
+    misses = [i for i, key in enumerate(new_keys) if cache.get(key) is None]
+    assert misses == [7], f"expected only the edited snippet to miss, got {misses}"
 
 
 @pytest.mark.slow
