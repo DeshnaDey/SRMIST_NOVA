@@ -37,6 +37,16 @@ mteb==2.20.11         # benchmark harness; provides AppsRetrieval + NDCG/MRR
 # ---- Embedding models -------------------------------------------------------
 sentence-transformers==6.0.1  # bi-encoder + cross-encoder reranker checkpoints
 
+# transformers is imported DIRECTLY by shipped code (src/config.py resolves a
+# checkpoint's context window through AutoTokenizer), so it must be declared
+# here rather than inherited. Until now it resolved only transitively via
+# sentence-transformers, which means a future sentence-transformers release
+# could move or drop that pin underneath us - and the failure would surface as
+# a wrong context window, i.e. quietly worse retrieval, not an ImportError.
+# Pinned to the version this stack already resolves and every number in
+# experiments.md was measured with.
+transformers==5.17.0  # AutoTokenizer, used directly by src/config.py
+
 # ---- Lexical retrieval ------------------------------------------------------
 # rank-bm25 MOVED to requirements-dev.txt: nothing imports it. The BM25
 # diagnostic implements Okapi directly over a scipy sparse matrix because
