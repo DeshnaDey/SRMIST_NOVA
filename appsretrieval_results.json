@@ -33,7 +33,7 @@
   },
   "smoke_run": false,
   "query_limit": null,
-  "wall_clock_seconds": 657.4,
+  "wall_clock_seconds": 624.1,
   "results": {
     "model_name": "Snowflake/snowflake-arctic-embed-m",
     "model_revision": "fc74610d18462d218e312aa986ec5c8a75a98152",
@@ -203,28 +203,28 @@
             }
           ]
         },
-        "evaluation_time": 657.4331222919864,
+        "evaluation_time": 624.1255584999453,
         "kg_co2_emissions": null,
-        "date": "2026-09-21 12:00:48.271212+00:00",
+        "date": "2026-09-21 13:27:11.931951+00:00",
         "evaluation_phases": [
           {
             "name": "Encoding corpus",
             "start": 0.0,
-            "end": 0.7522516250028275,
+            "end": 2.0587659999728203,
             "split": "test",
             "subset": "default"
           },
           {
             "name": "Encoding queries",
-            "start": 0.7523289999808185,
-            "end": 656.8826920000138,
+            "start": 2.0589228330063634,
+            "end": 623.5495999999694,
             "split": "test",
             "subset": "default"
           },
           {
             "name": "Scoring",
-            "start": 656.885184667015,
-            "end": 657.3729612919851,
+            "start": 623.5522807909874,
+            "end": 624.0488876659656,
             "split": "test",
             "subset": "default"
           }
