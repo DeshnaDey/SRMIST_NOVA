@@ -482,6 +482,49 @@ key sensitivity to text/model/version/flags, disk round-trip, corrupt entry
 degrading to a miss, and the P1 property that editing one snippet invalidates
 only that snippet. 41 passed, up from 38.
 
+### 2026-09-22 — Known limitations and deliberate non-decisions (submission seal)
+
+Recorded at seal time so these read as decisions rather than oversights. None
+is a to-do; each was considered and deliberately left as-is.
+
+**No `PINNED_VERSIONS` unit test exists.** Pin protection comes from the
+container gate, which installs from `requirements.txt` on a clean
+`python:3.11-slim` and then runs the full pipeline offline — so an
+unresolvable or incompatible pin fails the build, and a pin that changes
+behaviour fails the artifact diff. What that does NOT catch is a pin that is
+*wrong but installable and behaviourally identical*. A pytest assertion would
+close that gap, and it was deliberately not added: the tag and release are
+already cut against this gate, and adding an assertion changes what the gate
+asserts after the fact. Worth adding in the next cycle, not this one.
+
+**Step 12 (evolutionary retrieval) was not attempted.** Explicitly a bonus.
+Its gate required confirmed slack against the human deliverables (PPT, demo
+video, AI disclosure), which was never given, so no code was written. The
+design that was scoped, if anyone picks it up: extend the STEP 11
+content-hash cache to hold several corpus versions at once (it already keys
+by content hash and namespaces by `CACHE_VERSION`, so this is an extension
+rather than a rewrite), add near-duplicate clustering so near-identical
+snippets across versions cannot crowd the top-k, and use version metadata as
+the tie-break. It must stay additive and flag-gated, measured on train only,
+with its own results path — the same pattern as `CrossEncoderReranker`.
+
+**`1c765a2` carries a pre-existing `Co-Authored-By` trailer.** Left alone. It
+is on the public remote and rewriting history to remove it would invalidate
+every SHA after it, including the tagged submission commit. Flagged at each
+push instead.
+
+**The repository lives on an iCloud-synced Desktop, and iCloud damaged git
+internals repeatedly during this work.** Observed, not theorised: `.git/index`
+was deleted three separate times (making every tracked file read as deleted);
+conflict copies appeared inside `.git/refs/heads/` (`main 4`, `main 7`, plus
+seven stale `.lock` files) and `.git/refs/remotes/`; six `"name 2.ext"`
+duplicates were committed by accident and had to be removed and gitignored;
+a 27 MB `np.load` from `data/` failed outright with `TimeoutError [Errno 60]`,
+which is also why heavy caches were moved to `PRISM_DATA_DIR`. **Recommend
+moving the repository off the synced tree after the deadline** — the same fix
+already applied to the venv (`~/.prism/venv`). Not done now because moving a
+repo mid-submission is exactly the wrong time to do it.
+
 ## Backlog — ideas not yet measured
 
 Move a row into the table above once it has a number next to it.
