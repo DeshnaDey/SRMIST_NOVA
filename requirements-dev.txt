@@ -1,0 +1,21 @@
+# Development and diagnostic dependencies.
+#
+# Everything needed to RUN the submission lives in requirements.txt. This file
+# adds what only the tests and the diagnostic scripts import, so the runtime
+# image stays honest about what it actually needs.
+
+-r requirements.txt
+
+# The test suite.
+pytest==9.1.1
+
+# scipy is imported by scripts/bm25_diagnostic.py (sparse term-document matrix).
+# It was MISSING from requirements entirely - the diagnostic worked locally
+# only because something else pulled scipy in transitively, and a clean
+# container could not have run it.
+scipy==1.16.2
+
+# Referenced only in docstrings; the BM25 diagnostic does not import it. Kept
+# here so the comparison in scripts/bm25_diagnostic.py can be re-run if
+# anybody wants to reproduce the "rank_bm25 is too slow" measurement.
+rank-bm25==0.2.2

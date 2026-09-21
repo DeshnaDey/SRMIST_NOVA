@@ -38,7 +38,10 @@ mteb==2.20.11         # benchmark harness; provides AppsRetrieval + NDCG/MRR
 sentence-transformers==6.0.1  # bi-encoder + cross-encoder reranker checkpoints
 
 # ---- Lexical retrieval ------------------------------------------------------
-rank-bm25==0.2.2      # pure-Python BM25 for the sparse half of the hybrid
+# rank-bm25 MOVED to requirements-dev.txt: nothing imports it. The BM25
+# diagnostic implements Okapi directly over a scipy sparse matrix because
+# rank_bm25 measured at ~0.6 s/query here (see scripts/bm25_diagnostic.py),
+# and BM25 is a gated-out stage in any case.
 
 # ---- Vector index -----------------------------------------------------------
 faiss-cpu==1.15.0     # ANN index over snippet embeddings; CPU build only
@@ -52,7 +55,8 @@ numpy==2.4.6          # embedding matrices, score fusion arithmetic
 tqdm==4.70.1          # progress bars for the long encode/index passes
 
 # ---- Testing ----------------------------------------------------------------
-pytest==9.1.1         # seed tests, categories A-H
+# pytest MOVED to requirements-dev.txt: it is a test dependency, not a
+# runtime one. The image installs both, so the repro gate still runs.
 
 # =============================================================================
 # VERIFICATION - run this after installing. Both checks must print OK.
