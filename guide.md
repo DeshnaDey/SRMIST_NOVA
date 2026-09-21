@@ -16,7 +16,8 @@ Companion docs: [`README.md`](README.md) (setup + architecture),
 | Model | `Snowflake/snowflake-arctic-embed-m` (512 ctx, query-only instruction prefix) |
 | Test | NDCG@10 **0.08222** · MRR **0.06799** · **recall@100 0.30677** |
 | Train | recall@100 **0.6870** · recall@10 0.5458 · NDCG@10 0.4586 |
-| Pipeline | Bare bi-encoder. Every stage is still a no-op passthrough. |
+| Pipeline | **Full `PrismSearch` through MTEB's SearchProtocol.** Dense retrieval is real (`DenseIndexBuilder` + `DenseRetriever`); query/snippet preprocessing, BM25, fusion and rerank are all measured-and-off. |
+| Submission | `appsretrieval_results.json` — `pipeline: full`, split `test`, validated. Regenerate: `python scripts/run_eval.py --pipeline full --split test`. |
 | Cost | ~26 min full test run · ~4 min with all-MiniLM |
 
 **The bottleneck is recall, and it is in the encoder.** One gold doc per query, and it is
@@ -94,6 +95,12 @@ From [`data/inspection_report.md`](data/inspection_report.md):
   title+body join is marked dead at its three sites. It is kept because it is
   what keeps the baseline and SearchProtocol paths encoding byte-identical
   strings. Remove all three together or none.
+- The corpus encode is ~10 min and identical on every run, so document vectors
+  are cached by content hash (`src/corpus/index.py`). A warm cache builds the
+  index in **0.5 s** instead of 10 minutes.
+- **Keep heavy caches off the iCloud-synced Desktop.** A 27 MB `np.load` from
+  `data/` failed with `TimeoutError: [Errno 60]` mid-session. Use
+  `PRISM_DATA_DIR=~/.prism/data`; the config already supports it.
 - Truncation at arctic's 510-token budget: queries **train 24.6%, test 41.2%**;
   snippets **6.70%** (587/8,765). The **23.5%** snippet figure in the inspection
   report is at all-MiniLM's **254**-token window — do not reuse it for arctic.
@@ -107,6 +114,30 @@ From [`data/inspection_report.md`](data/inspection_report.md):
 - **No common query prefix.** `"Write a function"` opens 2.0% of queries, not
   "every query". The longest common prefix across all 5,000 train queries is
   the empty string.
+
+---
+
+## 3b. Two crashes that will eat your day
+
+**faiss + torch SEGFAULTS this build (exit 139).** Importing faiss and then
+running a torch forward pass kills the interpreter with no Python traceback —
+the process just vanishes, and it vanishes *after* the corpus index is built,
+so you lose the whole evaluation. faiss-cpu and torch each ship their own
+OpenMP runtime; this is the classic duplicate-libomp crash on macOS.
+Measured: default → SIGSEGV; `faiss.omp_set_num_threads(1)` → still SIGSEGV
+(too late, the runtime is already up); `OMP_NUM_THREADS=1` in the env → works,
+but pins torch to one thread and the encoder is the expensive half of every
+run. So `DenseIndexBuilder` uses an exact numpy index when
+`FAISS_INDEX_FACTORY == "Flat"` and never imports faiss. "Flat" is exact
+brute-force inner product, so numpy is not an approximation of it — it is the
+same computation. Any other factory still goes through faiss and will need
+`OMP_NUM_THREADS=1`.
+
+**`PrismSearch.mteb_model_meta` must not be None.** MTEB names its result
+directory from it, so leaving it None raises `TypeError: unsupported operand
+type(s) for /: 'PosixPath' and 'NoneType'` inside mteb's result cache — again
+*after* the full evaluation has run. The bare-encoder path never hit this
+because `BaselineEncoder` builds its own `ModelMeta`.
 
 ---
 

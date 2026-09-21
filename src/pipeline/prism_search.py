@@ -36,6 +36,7 @@ from src.interfaces import (
     RetrievalOutput,
     Snippet,
 )
+from src.pipeline.baseline import _build_model_meta
 from src.pipeline.mteb_compat import record_id, to_records
 from src.query.preprocess import get_query_processor
 from src.retrieval.bm25 import BM25Retriever
@@ -85,8 +86,14 @@ class PrismSearch:
         self.fuse = get_fusion_strategy()
         self.reranker: Any = None  # built in index(), needs snippet_lookup
 
-        #: Set by MTEB on some code paths; harmless if it stays None.
-        self.mteb_model_meta = None
+        #: MTEB names the result directory from this, so it must NOT be None.
+        #: Leaving it None raises deep inside mteb's result cache -
+        #: ``TypeError: unsupported operand type(s) for /: 'PosixPath' and
+        #: 'NoneType'`` in get_task_result_path - and it raises AFTER the
+        #: whole evaluation has run, so you lose the entire pass. The bare
+        #: encoder path never hit this because BaselineEncoder builds a
+        #: ModelMeta of its own.
+        self.mteb_model_meta = _build_model_meta(self.model_name)
 
     # =========================================================================
     # SearchProtocol.index

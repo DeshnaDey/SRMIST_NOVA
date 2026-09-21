@@ -19,8 +19,6 @@ from src.interfaces import ProcessedQuery, RankedList, Retriever
 class DenseRetriever(Retriever):
     """Nearest-neighbour search over snippet embeddings.
 
-    TODO(retrieval): implement.
-
     Retrieve outline
     ----------------
     1. Prepend ``config.QUERY_PROMPT_PREFIX`` if the checkpoint needs it.
@@ -59,20 +57,63 @@ class DenseRetriever(Retriever):
         self.model_name = model_name or config.DENSE_MODEL_NAME
         self._model = None  # TODO(retrieval): lazy-load SentenceTransformer
 
+    @property
+    def encoder(self):
+        """The shared bi-encoder, loaded once per retriever."""
+        if self._model is None:
+            from src.pipeline.baseline import BaselineEncoder
+
+            self._model = BaselineEncoder(self.model_name)
+        return self._model
+
     def retrieve(self, query: ProcessedQuery, top_k: int) -> RankedList:
         """Return the ``top_k`` nearest snippets. See class docstring."""
-        # TODO(retrieval): implement.
-        raise NotImplementedError("TODO(retrieval): DenseRetriever.retrieve")
+        return self.retrieve_batch([query], top_k)[0]
 
     def retrieve_batch(
         self, queries: list[ProcessedQuery], top_k: int
     ) -> list[RankedList]:
         """Batched search - encode all queries in one forward pass.
 
-        TODO(retrieval): implement. Worth doing properly: on CPU this is the
-        difference between minutes and an hour over the full query set. FAISS
-        ``search`` is natively batched, so pass the whole query matrix at once.
+        Done properly rather than as a per-query loop: on CPU this is the
+        difference between minutes and an hour over the full query set, and
+        FAISS ``search`` is natively batched.
+
+        The query prompt prefix is applied by ``BaselineEncoder`` via
+        ``prompt_type="query"`` - it is NOT applied here as well. Prefixing
+        twice is silent and costs accuracy, which is the failure mode called
+        out in guide.md.
         """
-        # TODO(retrieval): implement; falling back to the per-query loop is
-        # correct but slow.
-        return super().retrieve_batch(queries, top_k)
+        import numpy as np
+
+        if not queries:
+            return []
+
+        vecs = self.encoder.encode(
+            [q.text for q in queries], prompt_type="query",
+            batch_size=config.BATCH_SIZE,
+            normalize_embeddings=config.NORMALIZE_EMBEDDINGS,
+        )
+        vecs = np.ascontiguousarray(np.asarray(vecs, dtype=np.float32))
+        if config.NORMALIZE_EMBEDDINGS:
+            # numpy, not faiss.normalize_L2: importing faiss alongside torch
+            # segfaults this build (see src/corpus/index.py _use_exact_numpy).
+            norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+            vecs = vecs / np.maximum(norms, 1e-12)
+
+        index = self.index_builder.index
+        ids = self.index_builder.ids
+        k = min(top_k, index.ntotal)
+        scores, positions = index.search(vecs, k)
+
+        out: list[RankedList] = []
+        for row_scores, row_positions in zip(scores, positions):
+            ranked: RankedList = []
+            for score, pos in zip(row_scores, row_positions):
+                # FAISS pads with -1 when the index holds fewer than k
+                # vectors. ids[-1] is a REAL id and a wrong answer.
+                if pos < 0:
+                    continue
+                ranked.append((ids[pos], float(score)))
+            out.append(ranked)
+        return out

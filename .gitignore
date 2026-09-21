@@ -73,3 +73,13 @@ predictions/
 .env
 *.env
 !example.env
+
+# ---- iCloud conflict copies -------------------------------------------------
+# This repo lives on a Desktop synced by iCloud, which resolves write conflicts
+# by renaming files to "name 2.ext". Six of them were committed by accident
+# once; they are stale snapshots of real files and must never be tracked.
+# See guide.md for why .git/index also keeps disappearing here.
+* [0-9].py
+* [0-9].md
+* [0-9].json
+* [0-9].txt
