@@ -174,3 +174,63 @@ dropped stages" would delete it. Recommendation: **keep**, because it is the
 STEP 9 deliverable, it is flag-gated and documented, and it carries the guard
 that stops `ms-marco-MiniLM-L-6-v2`'s all-NaN output from silently faking a
 "reranking changed nothing" result. Deleting it would delete that protection.
+
+
+---
+
+# Outcomes (Phases 1–3)
+
+## Phase 1 — fixed
+
+| gap | commit | silent failure prevented |
+|---|---|---|
+| P0-1 baseline default / CMD | `ffd48b2` | shipping the bare encoder while believing it is the full pipeline |
+| P0-2 no prefetch | `3b10482` | the graded run reaching for the Hub and timing out |
+| P0-3 artifact outside the mount | `3b10482` | the deliverable discarded on container exit |
+| P0-4 scipy undeclared | `3b10482` | clean container cannot run the diagnostic |
+| P1-5 no Layer-1 tests | `b7cf313` | wrong prefix / mangled id / padding id, all scoring quietly worse |
+| P1-6 stale TODO skips | `0bdae37` | green suite over an untested retrieval path |
+| P2-7 rank-bm25, P2-8 join marker | `fe27765` | contract drift between the four join sites |
+
+`run_eval.py` now also refuses to write the submission artifact from any run
+that is not `--pipeline full --split test` unlimited, and refuses it at
+argument-parse time rather than after eleven minutes of work.
+
+The Layer-1 tests were **mutation-checked**, not merely observed green:
+giving arctic a document prefix and reversing the index sort order each turn
+the suite red.
+
+## Phase 2 — submission re-locked
+
+Full pipeline, full test split, current code (`9e49709`):
+
+    NDCG@10 0.08222   MRR@10 0.06799   recall@100 0.30677   10.4 min
+
+Identical to STEP 10 to 5dp — the check being made, since the STEP 11 cache
+rewiring must not move the number. `validate_results.py`: all checks pass,
+6dp agreement with MTEB's cached result.
+
+## Phase 3 — repro gate: PARTIAL
+
+| check | result |
+|---|---|
+| `pytest -m "not slow"` | **PASS** — 62 passed, 41 skipped |
+| offline end-to-end, cold embedding cache, `HF_HUB_OFFLINE=1` | **PASS** |
+| full test split offline, compared to the locked artifact | **PASS — reproduces exactly** |
+| clean-container build + run | **NOT RUN — no Docker daemon on this machine** |
+
+The offline run used an empty `PRISM_DATA_DIR`, so all 8,754 document vectors
+were re-encoded from scratch, with `HF_HUB_OFFLINE=1`,
+`TRANSFORMERS_OFFLINE=1` and `HF_DATASETS_OFFLINE=1` set. It reproduced
+`ndcg_at_10`, `mrr_at_10`, `recall_at_100` and `main_score` **bit-for-bit**
+against the locked artifact. That proves the pipeline needs no network and no
+pre-existing cache.
+
+What it does **not** prove is the image itself: the pinned `pip install`, the
+build-time `prefetch_assets.py --verify`, and the `CMD`. `docker` is not
+installed here, so `Dockerfile` changes are **unverified by execution**. The
+Dockerfile was written to avoid the one parser ambiguity that could not be
+checked (no comments inside backslash continuations).
+
+**This is a Phase 4 stop condition: the clean-container half of the repro
+gate has not been run.**
