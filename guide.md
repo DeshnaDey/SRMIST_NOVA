@@ -93,9 +93,15 @@ From [`data/inspection_report.md`](data/inspection_report.md):
   exploit it (ids are opaque by contract), but it is a free sanity check: if a
   run scores ~0, compare emitted ids against this pattern.
 - **`title` is empty for every row** — 0/8,765 corpus, 0/5,000 queries. The
-  title+body join is marked dead at its three sites. It is kept because it is
-  what keeps the baseline and SearchProtocol paths encoding byte-identical
-  strings. Remove all three together or none.
+  title+body join is marked dead at **four** sites, each carrying a
+  `DEAD-JOIN CONTRACT SITE` marker: `src/pipeline/prism_search.py`,
+  `scripts/inspect_data.py`, `scripts/bm25_diagnostic.py` and
+  `scripts/corpus_variants.py` (plus the equivalent handling in
+  `src/pipeline/mteb_compat.py`). It is kept because it is what keeps the
+  baseline and SearchProtocol paths encoding byte-identical strings. **Remove
+  every site together or none** — `tests/test_correctness.py` asserts they
+  agree. It said "three sites" while five copies existed, which is how a
+  contract quietly stops being one.
 - The corpus encode is ~11.6 min cold. Document vectors are content-hash
   cached (`src/versioning/cache.py`), so a warm rebuild is **0.7 s** and a
   100-snippet edit costs **19.6 s** — measured, `data/cache_rebuild_demo.json`.

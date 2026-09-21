@@ -80,8 +80,9 @@ _COMMENT_RE = re.compile(r"(?m)#.*$")
 def corpus_text(row: dict[str, Any], body: str | None = None) -> str:
     """Join a row into the string the encoder sees.
 
-    The title+body join is reproduced EXACTLY as the baseline and the BM25
-    diagnostic do it, including the dead branch. `title` is empty on all 8,765
+    DEAD-JOIN CONTRACT SITE (see guide.md). Remove every site together or
+    none. The title+body join is reproduced EXACTLY as the baseline and the
+    BM25 diagnostic do it, including the dead branch. `title` is empty on all 8,765
     rows, so the join always takes the body path - but it is kept byte-for-byte
     because the pipeline's three join sites must stay identical to each other
     (see guide.md). Variants substitute a rewritten ``body``; none of them

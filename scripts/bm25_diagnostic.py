@@ -180,8 +180,10 @@ def dense_rankings(
     qry_path = cache_dir / f"{tag}_queries.npy"
 
     def corpus_text(row: dict[str, Any]) -> str:
-        # Title is empty throughout this dataset (see inspection report); the
-        # join is kept only to stay byte-identical with the pipeline.
+        # DEAD-JOIN CONTRACT SITE (see guide.md). Title is empty on every row
+        # of this dataset, so this always returns the body; the join is kept
+        # only to stay byte-identical with the pipeline. Remove every site
+        # together or none.
         body = str(row.get("text", "") or "")
         title = str(row.get("title", "") or "")
         return f"{title}\n\n{body}" if title.strip() else body
