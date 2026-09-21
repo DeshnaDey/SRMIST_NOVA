@@ -191,8 +191,8 @@ def main() -> int:
     parser.add_argument(
         "--pipeline",
         choices=("baseline", "full"),
-        default="baseline",
-        help="Which model to evaluate (default: baseline).",
+        default="full",
+        help="Which model to evaluate (default: full, the submitted system).",
     )
     parser.add_argument(
         "--split",
@@ -246,6 +246,28 @@ def main() -> int:
         logger.error(
             "Installed mteb has no `evaluate` - that is the v1 API. "
             "This project targets MTEB v2. Upgrade and pin it in requirements.txt."
+        )
+        return 1
+
+    # Refuse to overwrite the locked submission artifact with anything that
+    # is not a full, unlimited run - and refuse BEFORE doing the work, not
+    # after, so a mistake costs a second rather than eleven minutes.
+    #
+    # The submission file is the one deliverable that is scored, and both ways
+    # to corrupt it are silent: a --limit smoke run writes a real-looking
+    # results file from a handful of queries, and a --pipeline baseline run
+    # writes the bare encoder with every field still plausible. On the current
+    # stack the baseline number even COINCIDES with the full pipeline's,
+    # because every optional stage is measured-and-off, so the corruption
+    # cannot be spotted by reading the file. Redirect with --output instead.
+    if args.output.resolve() == config.RESULTS_JSON.resolve() and (
+        args.limit is not None or args.pipeline != "full" or args.split != "test"
+    ):
+        logger.error(
+            "Refusing to write the submission artifact %s from a "
+            "pipeline=%s split=%s limit=%s run. The submission is the full "
+            "pipeline on the full test split. Use --output to write elsewhere.",
+            config.RESULTS_JSON.name, args.pipeline, args.split, args.limit,
         )
         return 1
 
