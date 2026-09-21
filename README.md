@@ -131,18 +131,35 @@ All versions are **pinned and verified** — resolved 2026-09-14 on macOS 15
 (arm64) / CPython 3.11.15, and confirmed by a clean-room install from
 `requirements.txt` alone.
 
-| Package | Version |
-|---|---|
-| `torch` | 2.14.0 (CPU) |
-| `mteb` | **2.20.11** (v2) |
-| `sentence-transformers` | 6.0.1 |
-| `faiss-cpu` | 1.15.0 |
-| `rank-bm25` | 0.2.2 |
-| `datasets` | 5.0.1 |
-| `huggingface_hub` | 1.31.0 |
-| `numpy` | 2.4.6 |
-| `tqdm` | 4.70.1 |
-| `pytest` | 9.1.1 |
+Runtime dependencies live in `requirements.txt`; test- and diagnostic-only
+ones live in `requirements-dev.txt` (which includes `requirements.txt`), so
+the image stays honest about what the submission actually needs.
+`pyproject.toml` does not carry a second list — it declares
+`dynamic = ["dependencies"]` and reads `requirements.txt`.
+
+| Package | Version | Where |
+|---|---|---|
+| `torch` | 2.14.0 (CPU) | runtime |
+| `mteb` | **2.20.11** (v2) | runtime |
+| `sentence-transformers` | 6.0.1 | runtime |
+| `transformers` | 5.17.0 | runtime — **explicitly pinned**, see below |
+| `faiss-cpu` | 1.15.0 | runtime |
+| `datasets` | 5.0.1 | runtime |
+| `huggingface_hub` | 1.31.0 | runtime |
+| `numpy` | 2.4.6 | runtime |
+| `tqdm` | 4.70.1 | runtime |
+| `pytest` | 9.1.1 | dev |
+| `scipy` | 1.16.2 | dev — `scripts/bm25_diagnostic.py` |
+| `rank-bm25` | 0.2.2 | dev — referenced in docstrings only, nothing imports it |
+
+**`transformers` is pinned explicitly, not inherited.** `src/config.py` imports
+`AutoTokenizer` directly to resolve a checkpoint's context window. Until
+recently it resolved only transitively through `sentence-transformers`; that
+worked, but a future `sentence-transformers` release could move or drop the
+pin underneath us and the symptom would be a wrong context window — quietly
+worse retrieval, not an `ImportError`. It is now declared at 5.17.0, the
+version the stack already resolved and every number in `experiments.md` was
+measured with. A fresh `pip install -r requirements.txt` gets it directly.
 
 **Import paths that are easy to get wrong** (all confirmed against 2.20.11 —
 each of these was wrong in the first draft and caught only by checking the
@@ -171,22 +188,31 @@ Don't bump anything without re-running the verification block above and
 
 ## Running the evaluation
 
-Day-one baseline — a bare bi-encoder, no pipeline stages:
+**The submission run.** `--pipeline` defaults to `full` and `--split` to
+`test`, so the bare command reproduces the submitted result and writes
+`appsretrieval_results.json`:
 
 ```bash
-python scripts/run_eval.py --pipeline baseline
+python scripts/run_eval.py
 ```
 
-The full hybrid pipeline:
+### Anything that is not the submission needs `--output`
+
+`run_eval.py` **refuses** to write `appsretrieval_results.json` from any run
+that is not `--pipeline full --split test` unlimited, and refuses at
+argument-parse time before loading a model. This is deliberate: a `--limit`
+smoke run produces a real-looking results file from a handful of queries, and
+a `--pipeline baseline` run writes the bare encoder — and on the current stack
+the baseline's NDCG is *identical* to the full pipeline's, because every
+optional stage is measured-and-off. The corrupted file could not be spotted by
+reading it. So redirect non-submission runs:
 
 ```bash
-python scripts/run_eval.py --pipeline full
-```
+# bare bi-encoder, for comparison
+python scripts/run_eval.py --pipeline baseline --output /tmp/baseline.json
 
-Fast smoke run while developing (**not a reportable score**):
-
-```bash
-python scripts/run_eval.py --pipeline baseline --limit 50
+# fast smoke run (NOT a reportable score)
+python scripts/run_eval.py --limit 50 --output /tmp/smoke.json
 ```
 
 ### The iteration loop
@@ -194,8 +220,8 @@ python scripts/run_eval.py --pipeline baseline --limit 50
 Experiment on **train**; keep **test** for confirming a winner, once.
 
 ```bash
-python scripts/run_eval.py --pipeline baseline --split train            # full train
-python scripts/run_eval.py --pipeline baseline --split train --limit 50 # fast probe
+python scripts/run_eval.py --split train --output /tmp/train.json
+python scripts/run_eval.py --split train --limit 50 --output /tmp/probe.json
 ```
 
 `--limit` samples deterministically from `config.RANDOM_SEED`, so two runs over
@@ -270,15 +296,39 @@ The dataset is small enough for CPU execution with NumPy and FAISS in a local
 or lab environment. The dominant runtime constraint is embedding and reranking on
 CPU, not the dataset size itself.
 
-### Docker (stub)
+### Docker — the reproducible path
+
+These are the exact commands CI runs on every push, so they are tested rather
+than aspirational (see
+[`.github/workflows/container-gate.yml`](.github/workflows/container-gate.yml)):
 
 ```bash
 docker build -t prism-retrieval .
 docker run --rm -v "$PWD/results:/app/results" prism-retrieval
 ```
 
-The `Dockerfile` is a **stub with open TODOs** — it has the right shape and the
-CPU-only constraints, but has not been built or tested yet.
+**Output:** `results/appsretrieval_results.json` on the host — the image's
+`CMD` is the full pipeline on the full test split
+(`--pipeline full --split test`), writing into the mounted volume.
+
+**It needs no network.** The model and dataset are baked in at build time by
+`scripts/prefetch_assets.py`, and the image then sets `HF_HUB_OFFLINE=1`,
+`TRANSFORMERS_OFFLINE=1` and `HF_DATASETS_OFFLINE=1`. You can prove it by
+removing the network entirely, which is what the gate does:
+
+```bash
+docker run --rm --network none -v "$PWD/results:/app/results" prism-retrieval
+```
+
+The dataset id and revision are read from the MTEB task itself rather than
+hardcoded, so the bake cannot drift out of step with what `task.load_data()`
+requests at runtime.
+
+**Verified.** The container gate builds the image, runs it with `--network
+none`, runs `pytest -m "not slow"` inside it, and diffs the container's output
+against the committed `appsretrieval_results.json`, failing on any mismatch.
+It reproduces NDCG@10 **0.08222** / MRR@10 **0.06799** / recall@100 **0.30677**
+bit-for-bit.
 
 ---
 
