@@ -307,6 +307,116 @@ Not round-tripped through `validate_results.py`: that validates an MTEB
 submission payload and this diagnostic produces none, as with the other two
 diagnostics.
 
+### 2026-09-21 — Cross-encoder reranking: GATED OUT (it loses), and one checkpoint is unusable
+
+Run `python scripts/rerank_eval.py --split train --limit 300 --pool 100`; raw
+numbers in `data/rerank_train_dev.json` and `data/rerank_train_dev_bge.json`.
+300-query dev subset of train (seeded), arctic-embed-m retrieving the pool.
+Reranking is a REORDERING move, so the metrics are NDCG@10 and MRR@10 —
+recall@100 is untouched by construction.
+
+**The ceiling, stated first, because it is the point.** This dataset has
+exactly one relevant document per query, so for a gold document at rank *r*
+after reranking, NDCG@10 = 1/log2(r+1) and MRR@10 = 1/r, with IDCG = 1. A
+perfect reranker puts it at rank 1 whenever it is in the pool and can do
+nothing when it is not, so **both metrics collapse to the same oracle:
+max NDCG@10 = max MRR@10 = recall@pool.** That is arithmetic, not a model
+assumption:
+
+| pool | train oracle | test oracle |
+|---:|---:|---:|
+| 10 | 0.5458 | 0.1285 |
+| 25 | 0.6082 | 0.1830 |
+| 50 | 0.6486 | 0.2361 |
+| 100 | **0.6870** | **0.3068** |
+
+Current dense NDCG@10 is 0.45863 (train) and 0.08222 (test). So on the graded
+split a **flawless** reranker of a 100-deep pool tops out at **0.307**, because
+the gold document is absent from the pool for **69.3%** of test queries. The
+generic rubric treats reranking as the big NDCG win; here breadth caps it
+before the reranker runs. That is the finding.
+
+**What the rerankers actually did: they lost, badly, and worse with depth.**
+
+| pool | dense NDCG@10 | MiniLM-L-4 | Δ | bge-reranker-base | Δ |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 0.48958 | 0.39023 | −0.0994 | 0.32983 | −0.1598 |
+| 25 | 0.48958 | 0.33696 | −0.1526 | 0.22394 | −0.2656 |
+| 50 | 0.48958 | 0.27835 | −0.2112 | — | — |
+| 100 | 0.48958 | 0.23177 | −0.2578 | — | — |
+
+(Dense NDCG@10 is identical across pools because NDCG@10 only reads ranks ≤10.)
+These are 300-query dev numbers, but the effect is ~10 standard errors
+(sd≈0.45, SE≈0.026 unpaired, less when paired), monotonic across four pool
+depths, and reproduced across two unrelated model families. `ENABLE_RERANK`
+stays `False`.
+
+**Why it loses — measured, not guessed.** Against a random reordering of the
+same pool (expected NDCG@10 = recall@pool × Σ_{r≤10} (1/log2(r+1)) / pool):
+
+| pool | random | MiniLM-L-4 | dense | oracle |
+|---:|---:|---:|---:|---:|
+| 10 | 0.2681 | 0.3902 | 0.4896 | 0.5900 |
+| 25 | 0.1181 | 0.3370 | 0.4896 | 0.6500 |
+| 50 | 0.0621 | 0.2783 | 0.4896 | 0.6833 |
+| 100 | 0.0326 | 0.2318 | 0.4896 | 0.7167 |
+
+Both rerankers sit **above random and below dense at every depth**. So they do
+carry relevance signal — they are not broken — it is just *weaker* signal than
+arctic's own ordering. Reranking therefore overwrites a better ranking with a
+worse one, and the deeper the pool the more of the good ordering gets
+overwritten. That is exactly the monotonic slope in the table.
+
+**It is not input truncation.** The obvious suspect was the 512-token pair
+budget against 700-token problem statements, but measured on 200 sampled
+pairs the median query keeps **99%** of its tokens (median query 298 tokens,
+median kept 254, median doc kept 124). Truncation is mild; the problem is
+domain — MS MARCO and bge rerankers are trained on natural-language questions
+against prose passages, and these pairs are competitive-programming statements
+against Python solutions.
+
+**`cross-encoder/ms-marco-MiniLM-L-6-v2` IS UNUSABLE ON THIS STACK.** The
+brief's speed choice, and what `RERANK_MODEL_NAME` used to name, returns
+**NaN for every pair**: fp32 weights all finite, NaN emerging from encoder
+layer 0, under both `sdpa` and `eager`. Checkpoint-specific, not stack-wide —
+L-4, L-12, TinyBERT-L-2 and bge-reranker-base all score finite.
+
+The failure mode is the dangerous kind. `argsort` on NaN preserves input
+order, so the first full measurement pass returned a flawless
+**"+0.00000 delta at every pool"** — a fake null that reads exactly like a
+clean negative result. It was caught only because a cross-encoder reordering
+100 candidates changing *nothing at all, to five decimals* is not credible.
+Two guards now exist: `scripts/rerank_eval.py` refuses to report numbers if
+any score is non-finite, and `CrossEncoderReranker` falls back to the fused
+order with a warning. `RERANK_MODEL_NAME` now points at L-4 so flipping
+`ENABLE_RERANK` cannot resurrect the NaN.
+
+**Latency — speed is a graded deliverable.** Measured on real 512-token pairs:
+
+| model | pairs/s | s/query @25 | s/query @100 |
+|---|---:|---:|---:|
+| ms-marco-MiniLM-L-4-v2 | 51.3 | 0.49 | 1.95 |
+| bge-reranker-base | 6.8 | 3.68 | 14.7 (est.) |
+
+Against the bi-encoder's **161 ms/query**, even the fast option is 3× the
+total query cost at pool 25 and 12× at pool 100 — to make the ranking worse.
+bge-reranker-base would need ~11 hours for one full test pass, which puts it
+in the same impractical bucket as Qodo-Embed.
+
+**No test-split run.** Nothing survived the train gate, and test is for
+confirming a winner once. The test oracle column above is computed from cached
+embeddings, not from a rerank pass.
+
+**The honest reading.** Reranking is not merely capped here, it is
+counter-productive with off-the-shelf checkpoints — and the cap is why the
+usual fix (a bigger, better reranker) is not worth chasing either: even
+perfect reordering of the top 100 cannot pass 0.307 on test. The lever remains
+breadth, i.e. the encoder, as the truncation probe already concluded.
+
+Not round-tripped through `validate_results.py`: this is a diagnostic and
+produces no MTEB payload. STEP 10 wires the real pipeline through
+`mteb.evaluate` and validates it there.
+
 ## Backlog — ideas not yet measured
 
 Move a row into the table above once it has a number next to it.
@@ -316,7 +426,7 @@ Move a row into the table above once it has a number next to it.
 | Swap in a code-specific bi-encoder | retrieval | General-purpose embeddings are trained on prose, not Python | not started |
 | **Fine-tune / hard-negative mining on train** | retrieval | **Now the top lever.** The truncation probe ruled out the input side: the encoder does not use a query's later tokens, so no amount of reshaping the input helps. What is left is the encoder itself. 5,000 train pairs with one gold doc each is a usable training set. | not started |
 | ~~Enable BM25 + RRF fusion~~ | retrieval | **GATED OUT — measured, see Decision log below.** BM25-only recall@100 is a respectable 0.4224, but it recovers only **133 queries (2.7%)** that arctic missed. Union ceiling 0.7136 vs arctic 0.6870: **+0.027 is the absolute best any fusion could reach**, before RRF gives some back. | dropped |
-| Cross-encoder rerank of top-50 | retrieval | Reordering the top candidates is literally what NDCG@10 measures | not started |
+| ~~Cross-encoder rerank of top-50~~ | retrieval | **GATED OUT — measured, see Decision log.** It does not just fail to help, it *loses*: MiniLM-L-4 −0.153 NDCG@10 at pool 25, −0.258 at pool 100; bge-reranker-base −0.266 at pool 25. Both beat random and lose to dense, i.e. weaker signal than arctic's own ordering. Capped anyway: oracle NDCG@10 = recall@pool = **0.307** on test. | dropped |
 | ~~Strip comments from snippets~~ | corpus | **GATED OUT — see Decision log.** There is almost no NL to strip or keep: 20.7% of snippets have a `#` comment, 5.8% a triple-quote, 32.6% have neither a comment nor a `def`/`class` line. The non-destructive direction (prepending them) measured **−0.0088, p=0.003**. | dropped |
 | ~~Truncate snippets head vs. tail~~ | corpus | **Superseded — see Decision log.** At arctic's real 510-token budget only **6.70%** of snippets overflow (the 23.5% was measured at all-MiniLM's 254). Chunking, which strictly dominates picking a half, recovered +0.0924 on the 249 affected queries but only **+0.0012** overall. | dropped |
 | ~~Compress query: drop Input/Output format sections and worked examples~~ | query | **GATED OUT — measured, see Decision log.** Cutting 25% off the tail of a fitting query (a *stronger* cut than the 79.4% real truncated queries retain) moves recall@100 **+0.002**; cutting 50% costs 0.010. The trailing boilerplate this proposal targets is exactly what those arms removed, and removing it bought nothing. | dropped |

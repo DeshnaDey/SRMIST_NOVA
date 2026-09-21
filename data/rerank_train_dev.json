@@ -1,0 +1,83 @@
+{
+  "split": "train",
+  "rerank_model": "cross-encoder/ms-marco-MiniLM-L-4-v2",
+  "dense_model": "Snowflake/snowflake-arctic-embed-m",
+  "scored_pool": 100,
+  "n_queries": 300,
+  "dev_subset": true,
+  "seed": 42,
+  "batch_size": 32,
+  "model_load_seconds": 9.3,
+  "total_rerank_seconds": 585.0,
+  "pairs_per_second": 51.3,
+  "pools": [
+    {
+      "pool": 10,
+      "oracle_ndcg_at_10": 0.59,
+      "dense": {
+        "ndcg_at_10": 0.48958,
+        "mrr_at_10": 0.45781,
+        "recall_at_10": 0.59
+      },
+      "reranked": {
+        "ndcg_at_10": 0.39023,
+        "mrr_at_10": 0.32763,
+        "recall_at_10": 0.59
+      },
+      "latency_seconds_per_query": 0.195,
+      "ndcg_delta": -0.09935,
+      "pct_of_oracle": 66.1
+    },
+    {
+      "pool": 25,
+      "oracle_ndcg_at_10": 0.65,
+      "dense": {
+        "ndcg_at_10": 0.48958,
+        "mrr_at_10": 0.45781,
+        "recall_at_10": 0.59
+      },
+      "reranked": {
+        "ndcg_at_10": 0.33696,
+        "mrr_at_10": 0.27814,
+        "recall_at_10": 0.53
+      },
+      "latency_seconds_per_query": 0.487,
+      "ndcg_delta": -0.15262,
+      "pct_of_oracle": 51.8
+    },
+    {
+      "pool": 50,
+      "oracle_ndcg_at_10": 0.68333,
+      "dense": {
+        "ndcg_at_10": 0.48958,
+        "mrr_at_10": 0.45781,
+        "recall_at_10": 0.59
+      },
+      "reranked": {
+        "ndcg_at_10": 0.27835,
+        "mrr_at_10": 0.22643,
+        "recall_at_10": 0.45
+      },
+      "latency_seconds_per_query": 0.975,
+      "ndcg_delta": -0.21123,
+      "pct_of_oracle": 40.7
+    },
+    {
+      "pool": 100,
+      "oracle_ndcg_at_10": 0.71667,
+      "dense": {
+        "ndcg_at_10": 0.48958,
+        "mrr_at_10": 0.45781,
+        "recall_at_10": 0.59
+      },
+      "reranked": {
+        "ndcg_at_10": 0.23177,
+        "mrr_at_10": 0.19468,
+        "recall_at_10": 0.35333
+      },
+      "latency_seconds_per_query": 1.949,
+      "ndcg_delta": -0.25781,
+      "pct_of_oracle": 32.3
+    }
+  ]
+}

@@ -342,9 +342,29 @@ FUSION_WEIGHTS: tuple[float, float] = (0.5, 0.5)
 
 ENABLE_RERANK: bool = False
 
-#: PLACEHOLDER - cross-encoder checkpoint. Cross-encoders are ~100x slower per
-#: pair than the bi-encoder, so RERANK_TOP_N is the real cost knob on CPU.
-RERANK_MODEL_NAME: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # PLACEHOLDER
+#: Cross-encoder checkpoint. Cross-encoders are ~100x slower per pair than the
+#: bi-encoder, so RERANK_TOP_N is the real cost knob on CPU.
+#:
+#: DO NOT SET THIS BACK TO ms-marco-MiniLM-L-6-v2. That checkpoint - the
+#: obvious default, and what this constant used to name - returns **NaN for
+#: every pair** on the pinned stack: fp32 weights all finite, NaN out of
+#: encoder layer 0, under both sdpa and eager attention. It is
+#: checkpoint-specific, not a stack problem: L-4, L-12, TinyBERT-L-2 and
+#: bge-reranker-base all score finite here.
+#:
+#: The failure is silent and flattering. Sorting by NaN preserves the input
+#: order, so the pipeline reports a spotless "reranking changed nothing"
+#: instead of an error - a fake null that cost an entire measurement pass
+#: before it was caught. CrossEncoderReranker now guards against it.
+#:
+#: MEASURED (experiments.md decision log): reranking is DISABLED because it
+#: LOSES. Both working candidates degrade NDCG@10 monotonically with pool
+#: depth - L-4 -0.099 at pool 10 down to -0.258 at pool 100; bge-reranker-base
+#: -0.160 and -0.266. Both beat a random reordering, so they carry some
+#: signal; both lose to arctic's own ordering, so applying them overwrites a
+#: better ranking with a worse one. This name is kept pointing at a WORKING
+#: checkpoint only so that flipping ENABLE_RERANK cannot resurrect the NaN.
+RERANK_MODEL_NAME: str = "cross-encoder/ms-marco-MiniLM-L-4-v2"
 
 #: How many fused candidates actually reach the cross-encoder.
 #: PLACEHOLDER - start small (25-50); CPU latency scales linearly with this.

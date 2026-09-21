@@ -47,6 +47,9 @@ data/*
 !data/truncation_probe.json
 !data/truncation_probe_test.json
 !data/corpus_variants.json
+!data/rerank_train_dev.json
+!data/rerank_train_dev_bge.json
+!data/corpus_variants_test.json
 *.faiss
 *.index
 *.npy

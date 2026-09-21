@@ -1,0 +1,23 @@
+{
+  "split": "test",
+  "model": "Snowflake/snowflake-arctic-embed-m",
+  "top_k": 100,
+  "seed": 42,
+  "snippet_budget": 510,
+  "chunk_size": 510,
+  "chunk_overlap": 64,
+  "n_queries": 3765,
+  "n_documents": 8765,
+  "variants": [
+    {
+      "variant": "base",
+      "description": "control - what the pipeline indexes today",
+      "documents_changed": 0,
+      "n_chunks": 8765,
+      "recall_at_100": 0.30677,
+      "recall_at_10": 0.12855,
+      "median_gold_rank": 435,
+      "encode_seconds": 0.0
+    }
+  ]
+}

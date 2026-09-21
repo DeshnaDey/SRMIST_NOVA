@@ -67,6 +67,7 @@ python scripts/bm25_diagnostic.py --split train
 python scripts/truncation_probe.py --split train          # causal truncation probe
 python scripts/truncation_probe.py --split test --out data/truncation_probe_test.json
 python scripts/corpus_variants.py --split train              # corpus-side levers
+python scripts/rerank_eval.py --split train --limit 300 --pool 100   # rerank + oracle
 pytest -m "not slow"                                              # 38 passed, 53 skipped
 ```
 
@@ -158,6 +159,8 @@ Do not redo these. Full reasoning is in the `experiments.md` decision log.
 | **Qodo-Embed-1-1.5B** | **Impractical** | 6.17 GB of fp32 weights and ~4–5 h per run on an 8 GB box. |
 | **Longer context as the lever** | **Weak** | e5 cut query truncation 61.5% → 24.4% for **+1.7 points of recall@100**, recall@10 flat, at 7.6× the encode cost. |
 | **Query compression** | **Dropped** | Causal probe, **train and test**: cutting 25% off a fitting query's tail — a *stronger* cut than the ~80% real truncated queries keep — moves recall@100 **+0.002** (train) and **+0.0018** (test). You must delete half a query to lose a point. The 27-point fits-vs-truncated gap is length-as-difficulty, not truncation: untruncated queries alone run 0.894 (0–127 tok) down to 0.545 (382–510 tok). |
+| **Cross-encoder reranking** | **Dropped — actively harmful** | MiniLM-L-4 −0.153 NDCG@10 at pool 25, −0.258 at pool 100; bge-reranker-base −0.266 at pool 25. Both above random, both below dense. Oracle NDCG@10 = recall@pool caps it at 0.307 on test regardless. |
+| **`cross-encoder/ms-marco-MiniLM-L-6-v2`** | **Unusable** | Returns **NaN for every pair** on the pinned stack (finite fp32 weights, NaN from encoder layer 0, both sdpa and eager). Siblings L-4/L-12/TinyBERT-L-2 and bge are finite, so it is checkpoint-specific. NaN sorts as a no-op, so it fakes a perfect "reranking changed nothing" null — guarded in both `rerank_eval.py` and `CrossEncoderReranker`. |
 | **Corpus preprocessing (all three levers)** | **Dropped** | `starter_code` +0.0016 (p=0.50), chunking +0.0012 (p=0.45), signature/comment header **−0.0088 (p=0.003)**. Chunking does work on its target — **+0.0924** on the 249 queries whose gold doc truncates — but only 4.98% of queries qualify, and max-over-chunks costs other queries by re-weighting toward long documents. |
 | **Stripping boilerplate query prefixes** | **Dropped** | Premise was false: no shared prefix exists (2.0%, not "every query"). |
 | **Published CoIR numbers as a guide** | **Unreliable here** | bge beat e5 on our data (NDCG@10 0.456 vs 0.437) while CoIR reports e5 11.52 vs bge 4.05. Likely CoIR used bge v1.0, not v1.5. |
@@ -203,9 +206,14 @@ p=0.003) all failed on train; nothing was kept and
 --split train` (document vectors are content-hash cached, so a rerun is
 seconds).
 
-**Deprioritise anything that only reorders the top 10** (cross-encoder rerank,
-RRF `k` tuning, fusion weights) until recall@100 moves. With one gold doc per
-query and 69% of them outside the top 100 on test, reordering is capped.
+**Reranking is measured and dropped — it made things worse.** Cross-encoder
+rerank of the dense pool *loses* NDCG@10 at every depth (MiniLM-L-4 −0.099 at
+pool 10 down to −0.258 at pool 100; bge-reranker-base −0.160 and −0.266). Both
+beat a random reordering but lose to arctic's own ordering, so they overwrite
+a better ranking with a weaker signal. Also note the arithmetic cap: with one
+gold doc per query, **oracle NDCG@10 = recall@pool**, so even a perfect
+reranker of the top 100 tops out at **0.307** on test. Deprioritise the rest
+of the reordering family (RRF `k`, fusion weights) for the same reason.
 
 ---
 

@@ -1,0 +1,49 @@
+{
+  "split": "train",
+  "rerank_model": "BAAI/bge-reranker-base",
+  "dense_model": "Snowflake/snowflake-arctic-embed-m",
+  "scored_pool": 25,
+  "n_queries": 300,
+  "dev_subset": true,
+  "seed": 42,
+  "batch_size": 32,
+  "model_load_seconds": 7.4,
+  "total_rerank_seconds": 1105.8,
+  "pairs_per_second": 6.8,
+  "pools": [
+    {
+      "pool": 10,
+      "oracle_ndcg_at_10": 0.59,
+      "dense": {
+        "ndcg_at_10": 0.48958,
+        "mrr_at_10": 0.45781,
+        "recall_at_10": 0.59
+      },
+      "reranked": {
+        "ndcg_at_10": 0.32983,
+        "mrr_at_10": 0.25091,
+        "recall_at_10": 0.59
+      },
+      "latency_seconds_per_query": 1.471,
+      "ndcg_delta": -0.15975,
+      "pct_of_oracle": 55.9
+    },
+    {
+      "pool": 25,
+      "oracle_ndcg_at_10": 0.65,
+      "dense": {
+        "ndcg_at_10": 0.48958,
+        "mrr_at_10": 0.45781,
+        "recall_at_10": 0.59
+      },
+      "reranked": {
+        "ndcg_at_10": 0.22394,
+        "mrr_at_10": 0.17769,
+        "recall_at_10": 0.37667
+      },
+      "latency_seconds_per_query": 3.676,
+      "ndcg_delta": -0.26564,
+      "pct_of_oracle": 34.5
+    }
+  ]
+}
