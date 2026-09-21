@@ -206,11 +206,15 @@ earn an `experiments.md` row.
 > `train`/`test`, and every query's gold doc sits in its own partition, so
 > filtering on it shrinks the candidate pool and manufactures a large fake gain.
 
-> **Unused signal: `meta_information.starter_code`.** Every corpus row carries a
-> populated `meta_information` dict holding the source problem URL and a
-> `starter_code` field. We currently index `text` only, so `starter_code` is
-> real content the retriever never sees. Unlike `partition` this is an
-> opportunity rather than a hazard — but measure it, do not assume it helps.
+> **`meta_information.starter_code` — MEASURED, and it is not a lever.** Every
+> corpus row carries a `meta_information` dict, but read the fields separately:
+> `url` is non-empty on 100% of rows while **`starter_code` is non-empty on only
+> 38.8%** (3,401/8,765). It is also largely redundant — **96.1%** of the
+> `def`/`class` names it holds already appear in the document's own text.
+> Indexing it alongside the body moved recall@100 **+0.0016 (p=0.50)** and was
+> *negative* on the queries it touched. See the Decision log in
+> [`experiments.md`](experiments.md). Unlike `partition` it was a legitimate
+> thing to try; it simply does not pay.
 
 Both write **`appsretrieval_results.json`** and print NDCG@10 / MRR. Copy those
 into [`experiments.md`](experiments.md) with what you changed.

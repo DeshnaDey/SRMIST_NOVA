@@ -66,6 +66,7 @@ python scripts/benchmark_models.py --model arctic-m --split train
 python scripts/bm25_diagnostic.py --split train
 python scripts/truncation_probe.py --split train          # causal truncation probe
 python scripts/truncation_probe.py --split test --out data/truncation_probe_test.json
+python scripts/corpus_variants.py --split train              # corpus-side levers
 pytest -m "not slow"                                              # 38 passed, 53 skipped
 ```
 
@@ -92,7 +93,16 @@ From [`data/inspection_report.md`](data/inspection_report.md):
   title+body join is marked dead at its three sites. It is kept because it is
   what keeps the baseline and SearchProtocol paths encoding byte-identical
   strings. Remove all three together or none.
-- Truncation at arctic's 510-token budget: **train 24.6%, test 41.2%**.
+- Truncation at arctic's 510-token budget: queries **train 24.6%, test 41.2%**;
+  snippets **6.70%** (587/8,765). The **23.5%** snippet figure in the inspection
+  report is at all-MiniLM's **254**-token window — do not reuse it for arctic.
+- `meta_information.starter_code` is non-empty on **38.8%** of rows, not all of
+  them; the `meta_information` *dict* is on all 8,765 and its `url` is 100%.
+- Snippets carry almost no natural language: **20.7%** have a `#` comment,
+  **5.8%** a triple-quote, **32.6%** have neither a comment nor a `def`/`class`
+  line. Any plan to "extract docstrings and comments" dies here.
+- Whitespace normalisation is an **exact no-op**: the wordpiece tokenizer already
+  discards indentation, so it yields byte-identical token ids.
 - **No common query prefix.** `"Write a function"` opens 2.0% of queries, not
   "every query". The longest common prefix across all 5,000 train queries is
   the empty string.
@@ -148,6 +158,7 @@ Do not redo these. Full reasoning is in the `experiments.md` decision log.
 | **Qodo-Embed-1-1.5B** | **Impractical** | 6.17 GB of fp32 weights and ~4–5 h per run on an 8 GB box. |
 | **Longer context as the lever** | **Weak** | e5 cut query truncation 61.5% → 24.4% for **+1.7 points of recall@100**, recall@10 flat, at 7.6× the encode cost. |
 | **Query compression** | **Dropped** | Causal probe, **train and test**: cutting 25% off a fitting query's tail — a *stronger* cut than the ~80% real truncated queries keep — moves recall@100 **+0.002** (train) and **+0.0018** (test). You must delete half a query to lose a point. The 27-point fits-vs-truncated gap is length-as-difficulty, not truncation: untruncated queries alone run 0.894 (0–127 tok) down to 0.545 (382–510 tok). |
+| **Corpus preprocessing (all three levers)** | **Dropped** | `starter_code` +0.0016 (p=0.50), chunking +0.0012 (p=0.45), signature/comment header **−0.0088 (p=0.003)**. Chunking does work on its target — **+0.0924** on the 249 queries whose gold doc truncates — but only 4.98% of queries qualify, and max-over-chunks costs other queries by re-weighting toward long documents. |
 | **Stripping boilerplate query prefixes** | **Dropped** | Premise was false: no shared prefix exists (2.0%, not "every query"). |
 | **Published CoIR numbers as a guide** | **Unreliable here** | bge beat e5 on our data (NDCG@10 0.456 vs 0.437) while CoIR reports e5 11.52 vs bge 4.05. Likely CoIR used bge v1.0, not v1.5. |
 
@@ -183,9 +194,14 @@ encoder demonstrably does not use a query's later tokens, so neither
 compression nor a longer context can pay (consistent with e5's +1.7 points
 for cutting truncation 61.5% → 24.4%).
 
-**Also unmeasured and cheap:** `meta_information.starter_code` is populated on
-every corpus row and we index `text` only — real content the retriever never
-sees.
+**The corpus side is now measured too, and none of it pays.** Appending
+`meta_information.starter_code` (+0.0016, p=0.50), chunking over-budget
+snippets (+0.0012, p=0.45) and prepending signature/comment headers (−0.0088,
+p=0.003) all failed on train; nothing was kept and
+`ENABLE_SNIPPET_PREPROCESSING` stays `False`. Numbers in the Decision log and
+`data/corpus_variants.json`; rerun with `python scripts/corpus_variants.py
+--split train` (document vectors are content-hash cached, so a rerun is
+seconds).
 
 **Deprioritise anything that only reorders the top 10** (cross-encoder rerank,
 RRF `k` tuning, fusion weights) until recall@100 moves. With one gold doc per

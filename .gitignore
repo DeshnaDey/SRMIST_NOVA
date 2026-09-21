@@ -46,6 +46,7 @@ data/*
 !data/bm25_diagnostic.json
 !data/truncation_probe.json
 !data/truncation_probe_test.json
+!data/corpus_variants.json
 *.faiss
 *.index
 *.npy

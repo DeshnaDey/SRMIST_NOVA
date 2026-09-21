@@ -215,6 +215,98 @@ own. Not round-tripped through `validate_results.py`: that validates an MTEB
 submission payload, and this diagnostic produces none — same as
 `bm25_diagnostic.py`.
 
+### 2026-09-21 — Corpus-side preprocessing: ALL THREE LEVERS GATED OUT
+
+Run `python scripts/corpus_variants.py --split train`; raw numbers in
+`data/corpus_variants.json`. Full train split, 5,000 queries, 8,765 documents,
+top-100. Query embeddings are untouched by every arm (STEP 7 changes only the
+document side) and are shared from cache; document embeddings are cached per
+document by content hash, so each arm encodes only what it rewrites. The
+control re-derives **0.68700** from cache with zero encoding, matching the
+logged row exactly.
+
+| variant | docs changed | recall@100 | Δ vs base | lost | gained | McNemar p |
+|---|---:|---:|---:|---:|---:|---:|
+| **base** (control) | 0 | **0.68700** | — | — | — | — |
+| `starter` — append `meta_information.starter_code` | 3,401 | 0.68860 | +0.0016 | 50 | 58 | 0.50 |
+| `chunk` — split >510-token docs, score by best chunk | 587 | 0.68820 | +0.0012 | 19 | 25 | 0.45 |
+| `augment` — prepend def/class lines + `#` comments | 5,911 | 0.67820 | **−0.0088** | 128 | 84 | **0.003** |
+
+**Nothing is kept.** Two arms are indistinguishable from noise and one is
+significantly harmful. `config.ENABLE_SNIPPET_PREPROCESSING` stays `False`.
+
+**`starter_code`: null, and it was predictable before the encode.** The field
+is non-empty on only **38.8%** of rows (3,401/8,765) — see the correction
+below. More decisively, **96.1%** of the `def`/`class` names it contains
+already appear in the document's own text, and 69.3% of starter_code strings
+are already verbatim substrings of it. So the arm mostly re-shows the encoder
+tokens it was already reading. Measured: +0.0016 pooled (p=0.50), and on the
+3,348 queries whose gold document it actually rewrote it is **negative**,
+0.8895 → 0.8868. This closes the "unused signal" item: the signal is not
+unused, it is duplicated.
+
+**`chunk`: works on its target, and its target is too small to matter.** This
+is the one arm with a real effect. On the 249 queries whose gold document
+exceeds the budget, recall@100 goes **0.4458 → 0.5382 (+0.0924)** — chunking
+genuinely recovers gold snippets that truncation had made invisible. It still
+cannot move the headline, because only **4.98%** of queries have a
+gold document that truncates at all. Measured beforehand, the oracle ceiling
+on fixing gold-document truncation *entirely* was **+0.0126** (lifting those
+queries to the fitting rate) or **+0.0276** (perfect recovery) — the same
+range as the BM25 fusion that was already gated out at +0.027.
+
+It also costs something elsewhere, which is why +0.0924 on 249 queries nets
+out to +6 queries overall. Scoring a document by its best chunk gives
+multi-chunk documents more chances to score high, so the 587 chunked documents
+became more competitive against *every* query, displacing correct answers for
+queries whose own gold document was never truncated: 19 queries lost against
+25 gained. Max-over-chunks is not a free win, it is a re-weighting of the
+corpus toward long documents.
+
+**`augment`: significantly harmful, and the clearest result here.** Prepending
+a document's own signature and comment lines cost **−0.0088** (p=0.003,
+McNemar), and −0.0175 on the 4,229 queries it touched. Repeating tokens that
+are already present, at the front, degrades the representation rather than
+emphasising it. This is the concrete instance of the warning already in
+`src/query/preprocess.py` — naive cleanups lose, measure them.
+
+**Three places the brief's premise did not survive the corpus.** Flagged, not
+silently worked around:
+
+1. **Corpus truncation is 6.70%, not 23.5%.** The 23.5% figure in
+   `data/inspection_report.md` is measured at all-MiniLM's **254**-token
+   window. At arctic's actual 510-token budget only **587/8,765 = 6.70%** of
+   snippets overflow (16.65% of all corpus tokens are lost). The chunking
+   opportunity is ~3.5x smaller than the brief assumed, which is exactly what
+   the measured oracle ceiling then showed.
+2. **`starter_code` is not on every row.** It is non-empty on 38.8%. The
+   `meta_information` *dict* is present on all 8,765 rows and its `url` field
+   is 100% populated — that is what the earlier note actually verified. Docs
+   corrected in this commit.
+3. **Extraction would destroy the corpus, so it was not built.** These are
+   competitive-programming solutions, not library code: only 20.7% carry a `#`
+   comment, 5.8% any triple-quote, **32.6% have no `def`/`class` line or
+   comment at all**, and identifiers are single letters (`zo`, `oz`, `zz`).
+   Extracting "signatures, docstrings and comments" leaves a median of **8**
+   tokens against a raw median of 132, and empties a third of the corpus. The
+   arm was therefore built as non-destructive augmentation — which still lost.
+
+**Whitespace normalisation is an exact no-op and got no arm.** Verified on
+1,500 documents: the wordpiece tokenizer already discards indentation, so
+normalising whitespace produces **byte-identical token ids** — hence identical
+embeddings and identical recall. Giving it an arm would have burned a
+15-minute encode to reproduce the control to five decimal places.
+
+**No test-split run.** Nothing survived on train, and test is for confirming a
+winner once. The only arm with a real effect (`chunk`) is bounded by a corpus
+property that is identical across splits — the corpus is the same 8,765
+documents in the same order in both — so the pooled result cannot differ in
+kind.
+
+Not round-tripped through `validate_results.py`: that validates an MTEB
+submission payload and this diagnostic produces none, as with the other two
+diagnostics.
+
 ## Backlog — ideas not yet measured
 
 Move a row into the table above once it has a number next to it.
@@ -225,12 +317,12 @@ Move a row into the table above once it has a number next to it.
 | **Fine-tune / hard-negative mining on train** | retrieval | **Now the top lever.** The truncation probe ruled out the input side: the encoder does not use a query's later tokens, so no amount of reshaping the input helps. What is left is the encoder itself. 5,000 train pairs with one gold doc each is a usable training set. | not started |
 | ~~Enable BM25 + RRF fusion~~ | retrieval | **GATED OUT — measured, see Decision log below.** BM25-only recall@100 is a respectable 0.4224, but it recovers only **133 queries (2.7%)** that arctic missed. Union ceiling 0.7136 vs arctic 0.6870: **+0.027 is the absolute best any fusion could reach**, before RRF gives some back. | dropped |
 | Cross-encoder rerank of top-50 | retrieval | Reordering the top candidates is literally what NDCG@10 measures | not started |
-| Strip comments from snippets | corpus | Less noise — but comments may be the only NL bridge to the query. Test both directions | not started |
-| Truncate snippets head vs. tail | corpus | APPS solutions exceed the context window; which half carries the signal? Note TASK A: only 23.5% of snippets overflow, vs **61.9% of queries** — the query side is the bigger loss and has no knob yet. | not started |
+| ~~Strip comments from snippets~~ | corpus | **GATED OUT — see Decision log.** There is almost no NL to strip or keep: 20.7% of snippets have a `#` comment, 5.8% a triple-quote, 32.6% have neither a comment nor a `def`/`class` line. The non-destructive direction (prepending them) measured **−0.0088, p=0.003**. | dropped |
+| ~~Truncate snippets head vs. tail~~ | corpus | **Superseded — see Decision log.** At arctic's real 510-token budget only **6.70%** of snippets overflow (the 23.5% was measured at all-MiniLM's 254). Chunking, which strictly dominates picking a half, recovered +0.0924 on the 249 affected queries but only **+0.0012** overall. | dropped |
 | ~~Compress query: drop Input/Output format sections and worked examples~~ | query | **GATED OUT — measured, see Decision log.** Cutting 25% off the tail of a fitting query (a *stronger* cut than the 79.4% real truncated queries retain) moves recall@100 **+0.002**; cutting 50% costs 0.010. The trailing boilerplate this proposal targets is exactly what those arms removed, and removing it bought nothing. | dropped |
-| Index `meta_information.starter_code` alongside the snippet body | corpus | Every corpus row has a populated `meta_information` dict with a `starter_code` field; we index `text` only, so it is signal the retriever never sees. Cheap to test. | not started |
+| ~~Index `meta_information.starter_code`~~ | corpus | **GATED OUT — measured, see Decision log.** Non-empty on only **38.8%** of rows, and **96.1%** of its `def`/`class` names already appear in the document text. Measured **+0.0016, p=0.50**, and −0.0027 on the queries it actually touched. The signal is duplicated, not unused. | dropped |
 | Query category routing | query | Different `QUERY_CATEGORIES` may want different top-k or fusion weights | not started |
 | Tune RRF `k` | retrieval | 60 is the paper default, not a measured optimum for this corpus | not started |
 | Split snake_case/camelCase in BM25 tokenizer | corpus | Lets "binary search" match `binary_search` | not started |
 | ~~Causal probe: truncate a fitting query, measure the recall drop~~ | query | **DONE — see Decision log, `data/truncation_probe.json`.** Verdict: truncation is NOT causal at the dose this dataset inflicts. The 27-point gap is length-as-difficulty — untruncated queries alone span 0.894 (0–127 tok) to 0.545 (382–510 tok). | done |
-| Chunk long snippets with overlap | corpus | Avoids truncating away the relevant function | not started |
+| ~~Chunk long snippets with overlap~~ | corpus | **GATED OUT — measured, see Decision log.** Real effect on its target (**+0.0924** on the 249 queries whose gold doc truncates) but only 4.98% of queries qualify, so **+0.0012** overall (p=0.45). Max-over-chunks also re-weights the corpus toward long documents and cost 19 queries elsewhere. Revisit only if the corpus gets longer. | dropped |

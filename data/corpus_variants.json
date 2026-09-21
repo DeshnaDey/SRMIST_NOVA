@@ -1,0 +1,77 @@
+{
+  "split": "train",
+  "model": "Snowflake/snowflake-arctic-embed-m",
+  "top_k": 100,
+  "seed": 42,
+  "snippet_budget": 510,
+  "chunk_size": 510,
+  "chunk_overlap": 64,
+  "n_queries": 5000,
+  "n_documents": 8765,
+  "variants": [
+    {
+      "variant": "base",
+      "description": "control - what the pipeline indexes today",
+      "documents_changed": 0,
+      "n_chunks": 8765,
+      "recall_at_100": 0.687,
+      "recall_at_10": 0.5458,
+      "median_gold_rank": 4,
+      "encode_seconds": 0.0
+    },
+    {
+      "variant": "starter",
+      "description": "append meta_information.starter_code",
+      "documents_changed": 3401,
+      "n_chunks": 8765,
+      "recall_at_100": 0.6886,
+      "recall_at_10": 0.5406,
+      "median_gold_rank": 5,
+      "encode_seconds": 0.0,
+      "delta_vs_base": 0.0016,
+      "queries_lost": 50,
+      "queries_gained": 58,
+      "on_affected_queries": {
+        "n": 3348,
+        "base_recall_at_100": 0.88949,
+        "variant_recall_at_100": 0.8868
+      }
+    },
+    {
+      "variant": "chunk",
+      "description": "split >budget documents into overlapping windows, score by best chunk",
+      "documents_changed": 587,
+      "n_chunks": 9850,
+      "recall_at_100": 0.6882,
+      "recall_at_10": 0.543,
+      "median_gold_rank": 4,
+      "encode_seconds": 344.7,
+      "delta_vs_base": 0.0012,
+      "queries_lost": 19,
+      "queries_gained": 25,
+      "on_affected_queries": {
+        "n": 249,
+        "base_recall_at_100": 0.44578,
+        "variant_recall_at_100": 0.53815
+      }
+    },
+    {
+      "variant": "augment",
+      "description": "prepend def/class lines and # comments, keep the body",
+      "documents_changed": 5911,
+      "n_chunks": 8765,
+      "recall_at_100": 0.6782,
+      "recall_at_10": 0.5308,
+      "median_gold_rank": 6,
+      "encode_seconds": 611.9,
+      "delta_vs_base": -0.0088,
+      "queries_lost": 128,
+      "queries_gained": 84,
+      "on_affected_queries": {
+        "n": 4229,
+        "base_recall_at_100": 0.75692,
+        "variant_recall_at_100": 0.73942
+      }
+    }
+  ]
+}
