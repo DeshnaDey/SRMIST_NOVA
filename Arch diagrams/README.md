@@ -2,13 +2,13 @@
 
 ## Current
 
-**`architecture-clean.drawio.xml` — NOT YET ADDED.**
+**[`architecture-clean.drawio.xml`](architecture-clean.drawio.xml)** — the
+shipped pipeline. This is the diagram to present.
 
-This directory has no diagram of the shipped pipeline. The replacement was
-supplied separately and has not landed in the repository; add it here and delete
-this paragraph.
+One page, four lanes: **OFFLINE** (build the index once), **ONLINE** (answer a
+query), **EVALUATION** (MTEB v2), and **VERSIONING · P1** (content-hash cache).
 
-The shipped pipeline it must show, and nothing else:
+What it shows, and nothing else:
 
 ```
  query ──► instruction prefix + token budget ──► bi-encoder ──► FAISS ──► top-k
@@ -33,3 +33,30 @@ why it was gated.
 
 It is archived rather than deleted because it is an accurate record of the
 architecture that was *designed* before the gates ran.
+
+## Two corrections made to the current diagram
+
+Both were checked against the code before committing, and both were places the
+diagram would otherwise have promised more than the repository delivers:
+
+1. **The "Query preprocessing" box no longer claims the instruction prefix and
+   token budget.** `ENABLE_QUERY_PREPROCESSING` is `False`, so
+   `get_query_processor()` returns `NoOpQueryProcessor` and the query text
+   passes through untouched. The instruction prefix
+   (`config.QUERY_PROMPT_PREFIX`) is applied by `BaselineEncoder.encode(...,
+   prompt_type="query")` in the **embed** step — `DenseRetriever.retrieve_batch`
+   carries an explicit docstring saying it is *not* applied there too, because
+   prefixing twice is silent and costs accuracy. The token budget is likewise
+   enforced by the encoder's own `max_seq_length`. Both labels moved onto the
+   "Embed query" box, and the preprocessing box is now marked as the
+   passthrough it is.
+2. **"Diff + content hash" → "Content hash per snippet".** There is no separate
+   diff step; the `hashlib.sha256` key lookup in `src/versioning/cache.py` *is*
+   the mechanism that decides what to re-embed.
+
+The **VERSIONING · P1 lane was kept**, because that code genuinely exists and
+runs: `DiskEmbeddingCache` with `ENABLE_EMBEDDING_CACHE = True`, entries
+version-namespaced under `CACHE_DIR/<CACHE_VERSION>/`, atomic writes via
+`os.replace`, wired into the shipped index build at `src/corpus/index.py:80`,
+and measured end to end — 695.3 s cold, **0.7 s warm**, 19.6 s for a
+100-snippet edit ([`../data/cache_rebuild_demo.json`](../data/cache_rebuild_demo.json)).
