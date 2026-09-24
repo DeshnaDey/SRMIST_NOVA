@@ -5,9 +5,18 @@ row in `experiments.md` you should only ever need this file plus a git SHA.
 
 CONVENTION
 ----------
-Values marked ``# PLACEHOLDER`` are deliberate guesses that nobody has
-validated yet. Replace them with something measured, then log the before/after
-numbers in ``experiments.md``.
+Two labels appear on values below, and they mean different things:
+
+``# UNVALIDATED DEFAULT``
+    A value on the SHIPPED path that works and was never swept. It is a
+    sensible default, not a guess pulled from nowhere, but no measurement
+    justifies this number over its neighbours. Sweeping one is a real
+    experiment; log the before/after in ``experiments.md``.
+
+``# PLACEHOLDER``
+    A value belonging to a stage that is gated out. Nothing reads it on the
+    shipped path, so it has never had the chance to be right or wrong. Only
+    relevant if that stage is ever revived.
 
 OWNERSHIP
 ---------
@@ -66,7 +75,8 @@ RANDOM_SEED: int = 42
 DEVICE: str = "cpu"
 
 #: Threads for torch / faiss. None = let the library decide.
-#: PLACEHOLDER - set to physical core count if encode throughput is the bottleneck.
+#: UNVALIDATED DEFAULT - set to physical core count if encode throughput is
+#: the bottleneck. The library default has never been benchmarked against one.
 NUM_THREADS: int | None = None
 
 
@@ -249,8 +259,9 @@ CHUNK_SIZE_CHARS: int = 1_500      # PLACEHOLDER
 CHUNK_OVERLAP_CHARS: int = 200     # PLACEHOLDER
 
 #: FAISS index factory string. "Flat" = exact brute force, correct but O(N).
-#: PLACEHOLDER - move to "IVF1024,Flat" or HNSW only if latency forces it, and
-#: re-measure NDCG afterwards because ANN is lossy.
+#: UNVALIDATED DEFAULT, and deliberately the conservative one: exact search
+#: cannot cost recall. Move to "IVF1024,Flat" or HNSW only if latency forces
+#: it, and re-measure NDCG afterwards because ANN is lossy.
 FAISS_INDEX_FACTORY: str = "Flat"
 
 #: Cosine similarity via inner product requires L2-normalized vectors.
@@ -276,7 +287,7 @@ NORMALIZE_EMBEDDINGS: bool = True
 DENSE_MODEL_NAME: str = "Snowflake/snowflake-arctic-embed-m"
 
 #: Encoder batch size. Lower it if the CPU box starts swapping.
-#: PLACEHOLDER
+#: UNVALIDATED DEFAULT - affects throughput only, never the scores.
 BATCH_SIZE: int = 32
 
 #: Token limit for the bi-encoder; None = use the checkpoint's own default,
@@ -320,9 +331,9 @@ BM25_B: float = 0.75
 #                  -> rerank -> TOP_K_FINAL
 # TOP_K_FINAL must stay >= 10 or NDCG@10 is truncated and the score is invalid.
 
-TOP_K_DENSE: int = 100   # PLACEHOLDER
-TOP_K_BM25: int = 100    # PLACEHOLDER
-TOP_K_FUSED: int = 100   # PLACEHOLDER - how many survive fusion into the reranker
+TOP_K_DENSE: int = 100   # UNVALIDATED DEFAULT - live; caps recall@100
+TOP_K_BM25: int = 100    # PLACEHOLDER - gated stage
+TOP_K_FUSED: int = 100   # UNVALIDATED DEFAULT - live; pool depth out of fusion
 TOP_K_FINAL: int = 10    # returned to MTEB; >= 10 required for NDCG@10
 
 # ---- Fusion -----------------------------------------------------------------
@@ -393,20 +404,6 @@ SMOKE_TEST_QUERY_LIMIT: int | None = None
 
 #: Release tag for the final submission.
 RELEASE_TAG: str = "PRISM_GENAI_HACKATHON_Y2026"
-
-
-# =============================================================================
-# DEMO / EXPLORATORY HOOKS                        (owner: query, from shanavi-work)
-# =============================================================================
-# Default-off toggles carried over from shanavi-work so that workstream is not
-# blocked. Neither is implemented yet; both are no-ops while False.
-
-#: AST-based structural analysis of snippets, for the demo.
-ENABLE_AST_DEMO: bool = False
-
-#: Expand a query with generated paraphrases before retrieval.
-ENABLE_QUERY_EXPANSION: bool = False
-QUERY_EXPANSION_MODEL: str = "google/flan-t5-small"
 
 
 def __getattr__(name: str) -> Any:
@@ -480,8 +477,6 @@ def describe() -> dict[str, object]:
         "encoder_window_cap": ENCODER_WINDOW_CAP,
         "faiss_index_factory": FAISS_INDEX_FACTORY,
         "cache_version": CACHE_VERSION if ENABLE_EMBEDDING_CACHE else None,
-        "ast_demo": ENABLE_AST_DEMO,
-        "query_expansion": ENABLE_QUERY_EXPANSION,
         "model_context_tokens": model_context_tokens(),
         "max_snippet_tokens": max_snippet_tokens(),
         "max_query_tokens": max_query_tokens(),

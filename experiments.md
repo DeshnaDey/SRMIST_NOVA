@@ -4,39 +4,219 @@ Every evaluation run gets a row. No exceptions — an unlogged experiment is an
 experiment we will run again by accident, and a number nobody can reproduce is
 worth less than no number at all.
 
-## How to log a run
+Contents, in the order you should read them:
 
-1. Run the eval: `python scripts/run_eval.py --pipeline full`
-2. Copy the printed NDCG@10 and MRR into a new row **at the bottom**.
-3. Change **one thing at a time**. Two changes in one row means you learn
+1. [Do not do these](#1-do-not-do-these--traps-that-manufacture-fake-numbers) — traps that manufacture fake numbers
+2. [Results](#2-results) — every row labelled with its split
+3. [Ablations](#3-ablations--what-was-dropped-and-how-it-was-measured) — what was dropped, how it was measured, and why it failed
+4. [Backlog](#4-backlog) — including dropped ideas, kept with their reasons
+
+---
+
+## 1. Do not do these — traps that manufacture fake numbers
+
+Each of these produces a number that looks fine. None of them errors. Read this
+section before touching the evaluation path.
+
+### The `partition` column — never filter on it
+
+The corpus carries a `partition` column labelling each snippet `train` / `test`,
+and **every query's gold document sits in its own partition.** Filtering the
+corpus on it shrinks the candidate pool from 8,765 to 3,765 and the score jumps
+for entirely the wrong reason — you have not retrieved better, you have deleted
+57% of the distractors, including none of the answers.
+
+This is guarded, not merely documented:
+`tests/test_correctness.py::test_partition_column_is_never_used_to_filter`
+greps every shipped module under `src/` and fails if any non-comment line
+references `"partition"`.
+
+### The `q<N>` → `d<N>` qrels are 1:1 — do not exploit it
+
+Query ids are `q<N>` and corpus ids are `d<N>`, and **every qrel in this dataset
+is `q<N> → d<N>`.** The answer to query `q4171` is document `d4171`.
+
+Any "retriever" that parses the integer out of the query id and emits the
+matching document id scores a perfect 1.0 and has retrieved nothing. Ids are
+opaque by contract — the pipeline may move them, join on them and return them,
+but must never parse or arithmetic on them.
+
+It is still useful as a **free sanity check in diagnostics only**: if a run
+scores near zero, compare the emitted ids against this pattern to tell "the
+ranking is bad" apart from "the ids are mangled and nothing is joining".
+
+### IDs are sacred
+
+A corpus id must survive every stage byte-for-byte. MTEB joins our results to
+its qrels on that exact string; mangle it and the score drops to zero with no
+error anywhere. Related: `tests/test_correctness.py` asserts the four
+`DEAD-JOIN CONTRACT SITE` markers agree, so the baseline and SearchProtocol
+paths keep encoding byte-identical strings.
+
+### Train and test are not comparable — label every number with its split
+
+Test is materially harder than train: **41.2%** of test queries exceed arctic's
+510-token budget against **24.6%** of train, and its gold snippets are longer.
+Train recall@100 0.6870 against test 0.30677 is mostly real difficulty, not a
+bug. Compare models to each other *within* a split; never across. Every number
+in this file is labelled with the split it came from, and that is not decoration.
+
+### MTEB's result cache will hand back a previous run's scores
+
+`mteb.evaluate` defaults to `overwrite_strategy="only-missing"` against a cache
+at `~/.cache/mteb`. Left alone, a model comparison silently compares a model
+against a cached copy of itself. `scripts/run_eval.py` forces
+`overwrite_strategy="always"` — keep it that way.
+
+### A smoke run poisons MTEB's cache, and the validator reads that cache
+
+**Order matters between `run_eval.py` and `validate_results.py`.** Found the
+hard way on 2026-09-24.
+
+`run_eval.py` forces `overwrite_strategy="always"` (correctly — see the previous
+trap), so **every** run rewrites MTEB's cached `AppsRetrieval.json` under
+`~/.cache/mteb/results/...`, including a `--limit 50` smoke run. Check 3 of
+`validate_results.py` compares the committed artifact against exactly that
+cached copy. So:
+
+```
+run_eval.py --limit 50 --output /tmp/smoke.json   # writes MTEB's cache too
+validate_results.py                                # check 3 FAILS
+  ours=0.08222  cached=0.08933      <- the smoke run's number, not a real mismatch
+```
+
+**The committed artifact is not damaged by this** — it is not written, and
+`git status` on it stays clean. Only checks 1 and 2 are self-contained; check 3
+is a comparison against mutable shared state outside the repo.
+
+**Do not "fix" this by editing the artifact or relaxing the check.** Restore the
+cache by re-running a genuine full, unlimited test evaluation, redirecting the
+output so the locked artifact stays byte-identical:
+
+```bash
+.venv/bin/python scripts/run_eval.py --pipeline full --split test \
+    --output results/restore_full.json
+```
+
+Then re-run `validate_results.py`. The safe ordering is **validate first, smoke
+second** — or re-validate after any smoke run.
+
+### Character caps are the wrong unit
+
+`MAX_SNIPPET_CHARS` and `MAX_QUERY_CHARS` are gone. They were character caps on
+a limit the tokenizer enforces in tokens, so they never fired. Reading either
+raises an `AttributeError` naming the replacement. Use
+`config.MAX_SNIPPET_TOKENS` / `config.MAX_QUERY_TOKENS`, which resolve from the
+active checkpoint.
+
+### Smoke runs are not results
+
+`--limit N` samples queries deterministically and prints `SMOKE RUN, not
+reportable`. It never earns a row below. `scripts/run_eval.py` additionally
+**refuses** to write `appsretrieval_results.json` from anything that is not a
+full, unlimited `--pipeline full --split test` run — redirect with `--output`.
+
+---
+
+## 2. Results
+
+Every row is a full, unlimited run on the split named in the Split column.
+
+| Date | Who | **Split** | Change made | NDCG@10 | MRR@10 | recall@10 | recall@100 | Wall-clock | Commit |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-09-19 | DeshnaDey | **test** (full, 3,765 q) | **Baseline**: bare bi-encoder `sentence-transformers/all-MiniLM-L6-v2`, no preprocessing, no BM25, no rerank | **0.06596** | 0.05581 | 0.0991 | 0.25259 | 4.1 min | `7a807b2` |
+| 2026-09-19 | DeshnaDey | **test** (full, 3,765 q) | **Model swap**: `all-MiniLM-L6-v2` → `Snowflake/snowflake-arctic-embed-m`. Selected on full **train** by recall@100 over e5-base-v2, bge-base-en-v1.5, all-MiniLM | **0.08222** | 0.06799 | 0.12855 | **0.30677** | 26.2 min | `f20bb96` |
+| 2026-09-21 | DeshnaDey | **test** (full, 3,765 q) | **Full pipeline through MTEB's `SearchProtocol`** (`--pipeline full`), so `mteb.evaluate` scores the actual pipeline rather than a bare encoder. Every optional stage stays OFF | **0.08222** | 0.06799 | 0.12855 | **0.30677** | 11.0 min | `STEP10` |
+| 2026-09-21 | DeshnaDey | **test** (full, 3,765 q) | **Submission re-lock**: same full pipeline, re-run after document caching was rewired onto `DiskEmbeddingCache`. No stage changed | **0.08222** | 0.06799 | 0.12855 | **0.30677** | 10.4 min | `PHASE2` |
+
+**Row notes**
+
+- **`7a807b2` (baseline).** The number every later row is measured against. The
+  gold doc is in the top 100 a quarter of the time, so there was real headroom
+  at this point.
+- **`f20bb96` (model swap).** recall@100 0.25259 → **0.30677 (+21.4%)** is the
+  metric that matters, because it caps what any later stage can recover.
+  recall@10 +29.7%. Costs 6.4× wall-clock and 8.3× query latency (161 ms vs
+  19 ms). `jina-v2-base-code` could not be benchmarked at all — its remote code
+  imports `find_pruneable_heads_and_indices`, removed in transformers 5.x.
+- **`STEP10` (full pipeline).** **Identical to the bare-encoder row to 5dp, and
+  that is the correctness proof**: with every optional stage gated out, the full
+  pipeline must reduce to the same dense retrieval, so any deviation would have
+  been a wiring bug. Round-tripped through `validate_results.py`; 6dp agreement
+  with MTEB's own cached result.
+- **`PHASE2` (re-lock).** Document cache served **8,765/8,765 with zero
+  encodes**. Byte-for-byte the same scores, which is the point: the cache
+  rewiring was proven not to move the number. **This is the locked submission
+  artifact; nothing affecting the number changes after it.**
+
+### Train-split reference numbers
+
+Model selection ran on **train**. These are not comparable to the test rows
+above and must never be quoted as results:
+
+| Model (train, full, 5,000 q) | recall@100 | recall@10 | NDCG@10 | encode | q-latency |
+|---|---:|---:|---:|---:|---:|
+| all-MiniLM-L6-v2 | 0.6560 | 0.5222 | 0.42349 | 114.8s | 19.35 ms |
+| e5-base-v2 | 0.6728 | 0.5226 | 0.43748 | 872.4s | 167.89 ms |
+| bge-base-en-v1.5 | 0.6642 | 0.5460 | 0.45628 | 884.1s | 172.25 ms |
+| **Snowflake/snowflake-arctic-embed-m** | **0.6870** | 0.5458 | 0.45863 | 842.8s | 160.66 ms |
+
+Raw numbers: `data/model_benchmark.json`.
+
+### How to log a run
+
+1. Run the eval: `.venv/bin/python scripts/run_eval.py --pipeline full --split test`
+2. Copy the printed NDCG@10 and MRR into a new row **at the bottom**, with its
+   split in the Split column.
+3. Change **one thing at a time.** Two changes in one row means you learn
    nothing about either.
 4. Record the commit SHA — that plus `src/config.py` must be enough to
    reproduce the row exactly.
+5. A change that makes things worse **still gets a row.** Negative results stop
+   the next person retrying the same idea at 3am.
 
-## Rules
+---
 
-- **Smoke runs (`--limit N`) never get a row.** They are not comparable.
-- **A change that makes things worse still gets a row.** Negative results stop
-  the next person retrying the same idea at 3am.
-- Note wall-clock time when it changes materially. A config that scores +0.01
-  but takes four hours on CPU is not a config we can submit.
+## 3. Ablations — what was dropped, and how it was measured
 
-## Results
+**Read the "How measured" column before quoting any row.** There are two very
+different kinds of evidence here, and collapsing them would misrepresent the
+work:
 
-| Date | Who | Change made | NDCG@10 | MRR | Wall-clock | Commit | Notes |
-|------|-----|-------------|---------|-----|------------|--------|-------|
-| 2026-09-19 | DeshnaDey | **Baseline**: bare bi-encoder `sentence-transformers/all-MiniLM-L6-v2`, no preprocessing, no BM25, no rerank | **0.06596** | 0.05581 | 4.1 min | `7a807b2` | Full `test` split (3,765 queries, 8,765 corpus). The number every later row is measured against. recall@10 0.0991, recall@100 0.2526 — the relevant doc is in the top 100 a quarter of the time, so there is real headroom for reranking. 61.9% of queries exceed the model's 254-token window (see `data/inspection_report.md`). |
-| 2026-09-19 | DeshnaDey | **Model swap**: `all-MiniLM-L6-v2` → `Snowflake/snowflake-arctic-embed-m` (512 ctx, query-only instruction prefix). Selected on full TRAIN by recall@100 over e5-base-v2, bge-base-en-v1.5, all-MiniLM | **0.08222** | 0.06799 | 26.2 min | `f20bb96` | Full `test`. **recall@100 0.30677** (baseline 0.25259, +21.4%) — the metric that matters, since it caps what a reranker can recover. recall@10 0.12855 (+29.7%). Costs 6.4x wall-clock and 8.3x query latency (161 ms vs 19 ms). jina-v2-base-code could not be benchmarked: its remote code imports `find_pruneable_heads_and_indices`, removed in transformers 5.x. |
-| 2026-09-21 | DeshnaDey | **Full pipeline through MTEB's SearchProtocol** (`--pipeline full`): implements `DenseIndexBuilder`, `DenseRetriever` and `CrossEncoderReranker`, so `mteb.evaluate` scores the ACTUAL pipeline rather than a bare encoder. All optional stages remain OFF — steps 6, 7 and 9 each failed their gate. | **0.08222** | 0.06799 | 11.0 min | `STEP10` | Full `test`. recall@100 **0.30677**. **Identical to the bare-encoder row `f20bb96` to 5dp, which is the correctness proof**: with every optional stage gated out the full pipeline reduces to the same dense retrieval, so any deviation would have been a wiring bug. Payload round-tripped through `validate_results.py` — all checks pass, including 6dp agreement with MTEB's own cached result. This is the locked submission artifact. |
-| 2026-09-21 | DeshnaDey | **Submission re-lock (Phase 2)**: same full pipeline, re-run after the cleanup pass (STEP 11 rewired document caching onto `DiskEmbeddingCache`, so the STEP 10 artifact predated the shipped code). No stage changed. | **0.08222** | 0.06799 | 10.4 min | `PHASE2` | Full `test`, 3,765 queries. recall@100 **0.30677**. Document cache served **8,765/8,765, zero encodes**. Byte-for-byte the same scores as the STEP 10 row, which is the point: the cache rewiring was proven not to move the number. Round-tripped through `validate_results.py` — all checks pass, 6dp agreement with MTEB's cached result. **This is the locked submission artifact; nothing affecting the number changes after it.** |
-| | | | | | | | |
+- **Implemented → measured → disabled.** The stage was built, run against the
+  pipeline, and switched off because the measurement said so. **One stage
+  qualifies: cross-encoder reranking.**
+- **Gated out on a pre-build diagnostic, with the measured bound.** A standalone
+  diagnostic established the ceiling on what the stage could ever buy *before*
+  it was wired into the pipeline, and the ceiling was too low to justify
+  building it. The module exists as a stub behind its flag; the measurement is
+  real and the bound is real, but the stage was never wired into a pipeline run.
 
-## Decision log
+Neither is a guess, and neither is "unfinished". A stage gated out on a measured
+oracle bound is a decision with a number attached.
 
-Measured decisions that did **not** produce a scored row, recorded so nobody
-relitigates them. A gate that says "no" is a result.
+| Stage | Flag (shipped) | How measured | Δ / bound | p | Why it failed |
+|---|---|---|---|---|---|
+| **Cross-encoder rerank** | `ENABLE_RERANK=False` | **Implemented, measured, disabled** — `CrossEncoderReranker` built and run via `scripts/rerank_eval.py`, 300-query seeded dev subset of **train**, pools 10/25/50/100 | **−0.0994** NDCG@10 at pool 10 → **−0.2578** at pool 100 (MiniLM-L-4); **−0.1598** → **−0.2656** (bge-reranker-base) | ~10 SE, monotonic over 4 depths, reproduced across 2 model families | Both rerankers sit **above random and below dense at every depth** — they carry relevance signal, just weaker than arctic's own ordering, so reranking overwrites a better ranking with a worse one. Capped anyway: oracle NDCG@10 = recall@pool = **0.307** on test |
+| **BM25 + RRF fusion** | `ENABLE_BM25=False` | **Gated out on a pre-build diagnostic** — `scripts/bm25_diagnostic.py`, full **train** split, complementarity 2×2 + union ceiling | **+0.027** recall@100 is the *oracle bound* on any fusion of these two lists (union ceiling 0.7136 vs dense 0.6870) | — (a bound, not a sample) | BM25 works (recall@100 **0.4224** alone) but **93.7% of its hits are queries dense already had** — only 133 queries (2.7%) are BM25-only. Fusion pays when systems fail on *different* queries; these fail on the same ones. Real RRF captures a fraction of +0.027 while pushing some dense-only hits out of the top 100 |
+| **Snippet preprocessing** | `ENABLE_SNIPPET_PREPROCESSING=False` | **Gated out on a pre-build diagnostic** — `scripts/corpus_variants.py`, full **train** split, 3 arms, McNemar | `starter` **+0.0016** · `chunk` **+0.0012** · `augment` **−0.0088** | 0.50 · 0.45 · **0.003** | Two arms are indistinguishable from noise, one is significantly **harmful**. `starter_code` duplicates signal already in the text (96.1% of its `def`/`class` names are already there). `chunk` works on its target (**+0.0924** on the 249 queries whose gold doc truncates) but only 4.98% of queries qualify. `augment` degrades the representation by repeating tokens at the front |
+| **Query compression** | `ENABLE_QUERY_PREPROCESSING=False` | **Gated out on a pre-build diagnostic** — `scripts/truncation_probe.py`, causal intervention on the queries that *fit*, **train** then confirmed on **test** | **+0.0021** (train) / **+0.0018** (test) at the 75% arm — a *stronger* cut than reality inflicts | — (null at the dose that matters) | The real dose is **79.4%** retained, and at a stronger 75% cut recall does not move. You must delete **half** of every query to lose one point. The proposal targeted trailing boilerplate — exactly what these arms removed, for nothing. The 27-point fits-vs-truncated gap is **length-as-difficulty**, not truncation: untruncated queries alone span 0.894 (0–127 tok) to 0.545 (382–510 tok) |
+
+**The one stage that ships ON:** `ENABLE_EMBEDDING_CACHE=True`. Measured, kept,
+and the P1 deliverable — see the content-hash cache section below.
+
+**`ENABLE_CHUNKING=False`** is the `chunk` arm above, gated by the same
+`corpus_variants.py` run.
+
+### Evidence behind each row
+
+The full decision log follows, unedited. Each section is the record of one gate.
 
 ### 2026-09-20 — BM25 + RRF fusion: GATED OUT before building
+
+*Gated out on a pre-build diagnostic, with the measured bound.
+`BM25Retriever` and `BM25IndexBuilder` are stubs — the ceiling was established
+before they were worth wiring.*
 
 Run `python scripts/bm25_diagnostic.py --split train`; raw numbers in
 `data/bm25_diagnostic.json`. Full train split, 5,000 queries, top-100,
@@ -98,6 +278,10 @@ wasted effort too, and the remaining headroom is in the encoder itself
 (fine-tuning, hard-negative mining) rather than in what we feed it.
 
 ### 2026-09-20 — Query compression: GATED OUT on a causal probe
+
+*Gated out on a pre-build diagnostic, with the measured null.
+`PrismQueryProcessor` is a passthrough stub — the intervention showed there was
+nothing for it to recover.*
 
 Run `python scripts/truncation_probe.py --split train`; raw numbers in
 `data/truncation_probe.json`. Full train split, the 3,770 queries that FIT
@@ -219,6 +403,9 @@ submission payload, and this diagnostic produces none — same as
 
 ### 2026-09-21 — Corpus-side preprocessing: ALL THREE LEVERS GATED OUT
 
+*Gated out on a pre-build diagnostic. All three arms were measured as corpus
+variants; `PrismSnippetProcessor` remains a passthrough stub.*
+
 Run `python scripts/corpus_variants.py --split train`; raw numbers in
 `data/corpus_variants.json`. Full train split, 5,000 queries, 8,765 documents,
 top-100. Query embeddings are untouched by every arm (STEP 7 changes only the
@@ -309,7 +496,12 @@ Not round-tripped through `validate_results.py`: that validates an MTEB
 submission payload and this diagnostic produces none, as with the other two
 diagnostics.
 
-### 2026-09-21 — Cross-encoder reranking: GATED OUT (it loses), and one checkpoint is unusable
+### 2026-09-21 — Cross-encoder reranking: IMPLEMENTED, MEASURED, DISABLED (it loses)
+
+*The one stage on this list that was built and run before being switched off.
+`CrossEncoderReranker` is a real implementation; `ENABLE_RERANK = False` is a
+measured verdict on working code, not an unfinished stub. One checkpoint is also
+outright unusable — see the NaN section below.*
 
 Run `python scripts/rerank_eval.py --split train --limit 300 --pool 100`; raw
 numbers in `data/rerank_train_dev.json` and `data/rerank_train_dev_bge.json`.
@@ -525,7 +717,9 @@ moving the repository off the synced tree after the deadline** — the same fix
 already applied to the venv (`~/.prism/venv`). Not done now because moving a
 repo mid-submission is exactly the wrong time to do it.
 
-## Backlog — ideas not yet measured
+---
+
+## 4. Backlog
 
 Move a row into the table above once it has a number next to it.
 

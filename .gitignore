@@ -60,7 +60,10 @@ data/*
 *.pickle
 
 # ---- Evaluation output ------------------------------------------------------
-results/
+# `results/*` not `results/` - git cannot re-include a file whose parent
+# directory is excluded, so the .gitkeep negation below needs the glob.
+results/*
+!results/.gitkeep
 predictions/
 # NOTE: appsretrieval_results.json is the graded deliverable and IS committed.
 # Keep it tracked so every score is traceable to a commit.
@@ -81,7 +84,8 @@ predictions/
 # by renaming files to "name 2.ext". Six of them were committed by accident
 # once; they are stale snapshots of real files and must never be tracked.
 # See guide.md for why .git/index also keeps disappearing here.
-* [0-9].py
-* [0-9].md
-* [0-9].json
-* [0-9].txt
+# Extension-specific rules miss the conflict copies that matter most - a
+# renamed directory (".venv 2") and the untyped files beside it - so the
+# patterns below match any name ending in " <digit>", at any depth.
+* [0-9]
+* [0-9].*

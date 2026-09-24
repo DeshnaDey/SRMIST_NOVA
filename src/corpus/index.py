@@ -122,23 +122,35 @@ class DenseIndexBuilder(IndexBuilder):
             raise RuntimeError("DenseIndexBuilder used before build()/load()")
         return self._index
 
-    def save(self, path: str) -> None:
-        """Write the FAISS index and the id map side by side.
+    #: Why save/load are unimplemented - a DECISION, not an unfinished task.
+    #:
+    #: Index persistence was superseded by the content-hash embedding cache in
+    #: src/versioning/cache.py. The cache already removes the cost this would
+    #: have removed: a warm rebuild of the full 8,765-snippet corpus is 0.7s
+    #: against a 695.3s cold encode, and a 100-snippet edit costs 19.6s
+    #: (measured, data/cache_rebuild_demo.json). Building the index from
+    #: cached vectors is the cheap part.
+    #:
+    #: So persisting the index buys no measurable time and adds a second
+    #: on-disk artifact that can silently go stale against the corpus - the
+    #: exact class of failure this project keeps getting bitten by. Implement
+    #: these only if a profile shows index construction, not encoding, is the
+    #: bottleneck.
+    _PERSISTENCE_SUPERSEDED = (
+        "DenseIndexBuilder does not persist: the content-hash embedding cache "
+        "(src/versioning/cache.py) makes a warm rebuild 0.7s against a 695.3s "
+        "cold encode, so a saved index would buy no time and add an artifact "
+        "that can go stale against the corpus. This is a decision, not a TODO "
+        "- see data/cache_rebuild_demo.json and the note above this method."
+    )
 
-        Both artifacts or neither - a half-saved index is a silent scoring bug.
-        """
-        # TODO(corpus): faiss.write_index(self._index, path) + dump self._ids
-        raise NotImplementedError("TODO(corpus): DenseIndexBuilder.save")
+    def save(self, path: str) -> None:
+        """Not implemented by decision. See ``_PERSISTENCE_SUPERSEDED``."""
+        raise NotImplementedError(self._PERSISTENCE_SUPERSEDED)
 
     def load(self, path: str) -> None:
-        """Restore index + id map. Must be equivalent to a fresh ``build``.
-
-        Validate that ``len(self._ids) == self._index.ntotal`` and fail loudly
-        if not - that mismatch is exactly the failure this method exists to
-        catch.
-        """
-        # TODO(corpus): implement.
-        raise NotImplementedError("TODO(corpus): DenseIndexBuilder.load")
+        """Not implemented by decision. See ``_PERSISTENCE_SUPERSEDED``."""
+        raise NotImplementedError(self._PERSISTENCE_SUPERSEDED)
 
     @property
     def ids(self) -> list[CorpusId]:

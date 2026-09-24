@@ -8,10 +8,10 @@ v2 passes a ``DataLoader`` yielding batch dicts keyed by modality ("text",
 "images", ...). Rather than scatter defensive imports and isinstance checks
 through the pipeline, they are quarantined here.
 
-TODO(eval): once requirements.txt is pinned, run
-``python -c "import mteb; print(mteb.__version__)"`` and confirm the resolved
-import paths below. Then delete the fallbacks for paths that don't apply -
-this file should shrink, not grow.
+The import paths below were confirmed against the pinned mteb 2.20.11. The
+fallbacks are kept deliberately: they cost nothing, and each one is a path a
+past 2.x release actually used, so they are cheap insurance against a future
+move rather than untested speculation.
 """
 
 from __future__ import annotations

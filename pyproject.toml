@@ -14,8 +14,13 @@ dynamic = ["dependencies"]
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 
-[tool.setuptools]
-packages = ["src"]
+# `find_packages` rather than a literal list: `packages = ["src"]` named only
+# the top-level package, so `pip install .` produced an install with none of
+# src.corpus / src.pipeline / src.query / src.retrieval / src.versioning in it.
+# Nothing caught it because pytest uses the `pythonpath` below and the
+# Dockerfile COPYs the tree instead of installing it.
+[tool.setuptools.packages.find]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

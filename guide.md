@@ -194,16 +194,25 @@ are gone; reading either raises an `AttributeError` naming the replacement. Use
 
 Do not redo these. Full reasoning is in the `experiments.md` decision log.
 
+**Two verdicts mean different things, and the distinction matters when you
+describe this work to anyone.** *Dropped (built)* means the stage was
+implemented, run, and switched off on its measurement — **only cross-encoder
+reranking qualifies**. *Dropped (pre-build gate)* means a standalone diagnostic
+established the ceiling before the stage was wired in, and the ceiling did not
+justify building it; the module is a stub behind its flag. Both are measured
+results. Neither is "unfinished", and neither should be written up as "built
+then disabled".
+
 | Idea | Verdict | Evidence |
 |---|---|---|
-| **BM25 + RRF fusion** | **Dropped** | BM25-only recall@100 0.4224 is respectable, but it recovers only **133 queries (2.7%)** arctic missed. Union ceiling 0.7136 vs 0.6870 — **+0.027 is the oracle bound**, and real RRF gives some back. 93.7% of BM25's hits are already dense hits. |
+| **BM25 + RRF fusion** | **Dropped (pre-build gate)** | BM25-only recall@100 0.4224 is respectable, but it recovers only **133 queries (2.7%)** arctic missed. Union ceiling 0.7136 vs 0.6870 — **+0.027 is the oracle bound**, and real RRF gives some back. 93.7% of BM25's hits are already dense hits. |
 | **jina-v2-base-code** | **Unusable** | Three stacked transformers 4.x/5.x breakages. Its remote code needs `find_pruneable_heads_and_indices` (removed in 5.x) and `config.is_decoder` (no longer defaulted); `config_kwargs` cannot reach the custom config. Needs an isolated transformers 4.x env, not more shims. |
 | **Qodo-Embed-1-1.5B** | **Impractical** | 6.17 GB of fp32 weights and ~4–5 h per run on an 8 GB box. |
 | **Longer context as the lever** | **Weak** | e5 cut query truncation 61.5% → 24.4% for **+1.7 points of recall@100**, recall@10 flat, at 7.6× the encode cost. |
-| **Query compression** | **Dropped** | Causal probe, **train and test**: cutting 25% off a fitting query's tail — a *stronger* cut than the ~80% real truncated queries keep — moves recall@100 **+0.002** (train) and **+0.0018** (test). You must delete half a query to lose a point. The 27-point fits-vs-truncated gap is length-as-difficulty, not truncation: untruncated queries alone run 0.894 (0–127 tok) down to 0.545 (382–510 tok). |
-| **Cross-encoder reranking** | **Dropped — actively harmful** | MiniLM-L-4 −0.153 NDCG@10 at pool 25, −0.258 at pool 100; bge-reranker-base −0.266 at pool 25. Both above random, both below dense. Oracle NDCG@10 = recall@pool caps it at 0.307 on test regardless. |
+| **Query compression** | **Dropped (pre-build gate)** | Causal probe, **train and test**: cutting 25% off a fitting query's tail — a *stronger* cut than the ~80% real truncated queries keep — moves recall@100 **+0.002** (train) and **+0.0018** (test). You must delete half a query to lose a point. The 27-point fits-vs-truncated gap is length-as-difficulty, not truncation: untruncated queries alone run 0.894 (0–127 tok) down to 0.545 (382–510 tok). |
+| **Cross-encoder reranking** | **Dropped (built, measured, disabled) — actively harmful** | MiniLM-L-4 −0.153 NDCG@10 at pool 25, −0.258 at pool 100; bge-reranker-base −0.266 at pool 25. Both above random, both below dense. Oracle NDCG@10 = recall@pool caps it at 0.307 on test regardless. |
 | **`cross-encoder/ms-marco-MiniLM-L-6-v2`** | **Unusable** | Returns **NaN for every pair** on the pinned stack (finite fp32 weights, NaN from encoder layer 0, both sdpa and eager). Siblings L-4/L-12/TinyBERT-L-2 and bge are finite, so it is checkpoint-specific. NaN sorts as a no-op, so it fakes a perfect "reranking changed nothing" null — guarded in both `rerank_eval.py` and `CrossEncoderReranker`. |
-| **Corpus preprocessing (all three levers)** | **Dropped** | `starter_code` +0.0016 (p=0.50), chunking +0.0012 (p=0.45), signature/comment header **−0.0088 (p=0.003)**. Chunking does work on its target — **+0.0924** on the 249 queries whose gold doc truncates — but only 4.98% of queries qualify, and max-over-chunks costs other queries by re-weighting toward long documents. |
+| **Corpus preprocessing (all three levers)** | **Dropped (pre-build gate)** | `starter_code` +0.0016 (p=0.50), chunking +0.0012 (p=0.45), signature/comment header **−0.0088 (p=0.003)**. Chunking does work on its target — **+0.0924** on the 249 queries whose gold doc truncates — but only 4.98% of queries qualify, and max-over-chunks costs other queries by re-weighting toward long documents. |
 | **Stripping boilerplate query prefixes** | **Dropped** | Premise was false: no shared prefix exists (2.0%, not "every query"). |
 | **Published CoIR numbers as a guide** | **Unreliable here** | bge beat e5 on our data (NDCG@10 0.456 vs 0.437) while CoIR reports e5 11.52 vs bge 4.05. Likely CoIR used bge v1.0, not v1.5. |
 
