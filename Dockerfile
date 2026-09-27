@@ -48,13 +48,39 @@ COPY requirements.txt requirements-dev.txt ./
 # Linux, where the default PyPI wheels ARE the CUDA builds (~2.5 GB) - so
 # unlike on a Mac, the index-url here is load-bearing, not cosmetic.
 # Version kept in lockstep with requirements.txt.
-RUN pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu \
+#
+# BUILD TOOLCHAIN - why apt is here at all. pytrec-eval-terrier (transitive,
+# via mteb) publishes linux wheels for x86_64 ONLY: every manylinux and
+# musllinux artifact for 0.5.10 is x86_64, and there is no linux aarch64 wheel.
+# On linux/arm64 pip therefore compiles its C/C++ extension from the sdist, and
+# python:3.11-slim ships no compiler, so the install died with
+#   error: [Errno 2] No such file or directory: 'gcc'
+# CI never hit this because ubuntu-latest is linux/amd64 and gets the prebuilt
+# wheel. The macOS wheels are universal2, which is why a native mac venv also
+# installs it without a compiler.
+#
+# build-essential is installed for the compile and purged in the SAME layer, so
+# it adds nothing to the final image. The compiled extension links only against
+# libstdc++6 and libgcc-s1, which are base packages of python:3.11-slim (dpkg
+# state "ii", not auto-installed), so --auto-remove cannot take them away.
+#
+# NOTE: no comments inside the backslash continuation below, for the same
+# portability reason as the ENV block above.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir -r requirements-dev.txt
+    && pip install --no-cache-dir -r requirements-dev.txt \
+    && apt-get purge -y --auto-remove build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Fail the BUILD, not the graded run, if the MTEB v2 API has shifted.
+# Fail the BUILD, not the graded run, if the MTEB v2 API has shifted. The
+# pytrec_eval import is here because it is the one extension compiled from
+# source on this platform: if the purge above ever strips a library it needs,
+# this fails at build time instead of as an ImportError mid-evaluation.
 RUN python -c "\
 import mteb; \
+import pytrec_eval; \
 from mteb.models.abs_encoder import AbsEncoder; \
 from mteb.models import ModelMeta; \
 assert mteb.get_task('AppsRetrieval'); \
