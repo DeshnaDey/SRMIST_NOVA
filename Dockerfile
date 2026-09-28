@@ -36,8 +36,7 @@ WORKDIR /app
 #
 # NOTE: no comments inside the ENV continuation below. A `#` line in the
 # middle of a backslash-continued instruction is not portable across
-# Dockerfile parsers, and this image cannot be build-tested on the dev
-# machine (no Docker daemon), so it is written to avoid the question.
+# Dockerfile parsers, so it is written to avoid the question.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HF_HOME=/app/.cache/huggingface \

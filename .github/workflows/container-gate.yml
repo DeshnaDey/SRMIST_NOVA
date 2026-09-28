@@ -1,11 +1,14 @@
 # Phase-3 container gate.
 #
-# This runs the half of the repro gate that cannot be run on the dev machine
-# (no Docker daemon there). It is the "works on my laptop" check: the local
-# offline run already proved the PIPELINE needs no network, but it could not
-# prove the IMAGE - that the pinned wheels resolve on linux/amd64, that the
-# build-time prefetch populates the very cache the runtime reads, and that
-# CMD produces the submission artifact rather than something weaker.
+# This is the CI half of the repro gate. It was written when the dev machine
+# had no Docker daemon; the image has since also been built and run by hand on
+# macOS Apple Silicon (linux/arm64, see the README Docker section), and this
+# job keeps checking linux/amd64 on every push. It is the "works on my laptop"
+# check: the local offline run already proved the PIPELINE needs no network,
+# but it could not prove the IMAGE - that the pinned wheels resolve on
+# linux/amd64, that the build-time prefetch populates the very cache the
+# runtime reads, and that CMD produces the submission artifact rather than
+# something weaker.
 #
 # The job fails loudly on: a build error, a missing/unresolvable wheel, any
 # Hub access at runtime, a red test suite, or an artifact that does not

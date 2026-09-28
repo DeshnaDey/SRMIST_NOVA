@@ -108,6 +108,9 @@ git clone https://github.com/DeshnaDey/SRMIST_NOVA.git
 cd SRMIST_NOVA
 ```
 
+On macOS, clone into a folder iCloud does not sync. See
+[macOS: keep the repo out of iCloud](#macos-keep-the-repo-out-of-icloud).
+
 **1. Create and activate the virtual environment** (Python 3.11):
 
 ```bash
@@ -158,31 +161,27 @@ tests that pin the MTEB v2 API surface and the traps in
 tests are kept alongside the stubs as the record of what each stage was supposed
 to do.
 
-### macOS: keep the venv off iCloud Drive
+### macOS: keep the repo out of iCloud
 
-If this repo lives under `~/Desktop` or `~/Documents` **and** iCloud "Desktop &
-Documents" sync is on, `fileproviderd` will churn through the ~1.6 GB virtual
-environment continuously. Measured on this project: `import mteb` never
-completed in 7+ minutes, at 0% CPU, because every read was blocking on the
-iCloud file provider.
+Do not clone this repo into a folder that iCloud syncs, such as `~/Desktop` or
+`~/Documents` when "Desktop & Documents Folders" is turned on in iCloud
+settings. Clone it somewhere like `~/Projects` instead. Two things go wrong
+inside a synced folder:
 
-Put the venv outside the synced tree and symlink it back:
+- **git breaks.** iCloud makes duplicate copies of git's internal files with
+  ` 2` added to the name (for example `.git/refs/heads/main 2`). After that,
+  `git pull` fails with `fatal: bad object refs/heads/main 2`. This happened on
+  this project on 2026-09-26.
+- **Reads stall.** iCloud blocks file reads while it syncs. From a synced
+  folder, `import mteb` never finished in over 7 minutes, and a 27 MB
+  `np.load` from `data/` failed with `TimeoutError: [Errno 60]`.
 
-```bash
-python3.11 -m venv ~/.prism/venv
-~/.prism/venv/bin/python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
-~/.prism/venv/bin/python -m pip install -r requirements.txt
-ln -s ~/.prism/venv .venv        # so `source .venv/bin/activate` still works
-```
+If your copy already lives in Desktop or Documents, make a fresh clone in a
+folder iCloud does not sync, rather than moving the old one, so none of the
+duplicate files come along.
 
-After the move the same import takes ~110 s cold and a few seconds warm.
-
-The Hugging Face cache defaults to `~/.cache/huggingface`, which is already
-outside the synced tree — leave `PRISM_HF_CACHE` unset unless you have a
-reason. **`ENABLE_EMBEDDING_CACHE` is on by default** — point `PRISM_DATA_DIR`
-somewhere unsynced too, since the embedding cache grows fast and is pure build
-output. A 27 MB `np.load` from a synced `data/` failed outright here with
-`TimeoutError: [Errno 60]`.
+The Hugging Face cache (`~/.cache/huggingface`) is already outside the synced
+folders, so leave `PRISM_HF_CACHE` unset unless you have a reason.
 
 ### Pinned versions
 
@@ -372,49 +371,110 @@ measured and off.
 
 ### Docker — the reproducible path
 
-These are the exact commands CI runs on every push, so they are tested rather
-than aspirational (see
-[`.github/workflows/container-gate.yml`](.github/workflows/container-gate.yml)):
+**Status.** Built and run on macOS (Apple Silicon, linux/arm64) with Docker
+Desktop on 2026-09-28. The full test-split run inside the container reproduced
+the committed `appsretrieval_results.json` exactly: NDCG@10 **0.08222**, MRR@10
+**0.0679943717194713**, recall@10 **0.12855**, recall@100 **0.30677**. CI also
+builds and runs the image on linux/amd64 on every push (see below).
+
+**What you need**
+
+- Docker Desktop with at least **6 GB of memory** (Settings, Resources). We
+  used 8 GB and 8 CPUs.
+- About **20 GB of free disk** before you build (check with `df -h ~`). The
+  final image is about 3.5 GB, but the build needs room for downloads and
+  intermediate layers.
+- Network for the first build only. It downloads about 1 GB (Python packages,
+  the model and the dataset). The run itself needs no network.
+
+**Apple Silicon.** One dependency, `pytrec-eval-terrier`, has no prebuilt
+package for linux/arm64, so the build compiles it from source. The
+`Dockerfile` installs a compiler for that step and removes it again, so there
+is nothing to do on your side.
+
+**Commands, in order** (from the repo root):
 
 ```bash
+mkdir -p ~/.cache/mteb results
+
+# 1. Build
 docker build -t prism-retrieval .
-docker run --rm -v "$PWD/results:/app/results" prism-retrieval
+
+# 2. Run the submission: full pipeline, full test split, no network
+docker run --rm -t --network none \
+  -v ~/.cache/mteb:/root/.cache/mteb \
+  -v prism-data:/app/data \
+  -v "$PWD/results:/app/results" \
+  prism-retrieval
+
+# 3. Validate, straight after step 2
+docker run --rm \
+  -v ~/.cache/mteb:/root/.cache/mteb \
+  -v "$PWD/results:/app/results" \
+  prism-retrieval python scripts/validate_results.py --results /app/results/appsretrieval_results.json
 ```
 
-**Output:** `results/appsretrieval_results.json` on the host — the image's
-`CMD` is the full pipeline on the full test split
-(`--pipeline full --split test`), writing into the mounted volume.
+**Output:** `results/appsretrieval_results.json` on the host. The image's
+`CMD` is the full pipeline on the full test split (`--pipeline full --split
+test`). It writes into the mounted `results/` folder and never touches the
+committed `appsretrieval_results.json` in the repo root. `prism-data` is a
+named Docker volume that keeps the document embeddings between runs. The
+`~/.cache/mteb` mount keeps MTEB's own copy of the result, which the validator
+compares against.
+
+**Smoke runs.** A quick run with `--limit` must use its own `--output`, for
+example `--output /app/results/smoke.json`. `run_eval.py` refuses to write the
+submission file from a limited run. Never run it between step 2 and step 3:
+every run overwrites MTEB's cached result, so the validator would compare the
+full run against the smoke run's numbers and fail.
+
+**Timings** (MacBook with Apple Silicon, Docker Desktop with 8 CPUs and 8 GB,
+on battery with Low Power Mode off):
+
+| What | Time |
+|---|---|
+| First build (mostly downloading, on a ~270 kB/s connection) | about 22 min |
+| First run (empty `prism-data`, 8 threads) | 65.0 min |
+| Repeat run (`prism-data` already filled, 8 threads) | 26.6 min |
+| Native venv on macOS, no Docker ([`experiments.md`](experiments.md)) | 10.4 min |
+
+The first run is the slow one because it encodes all 8,765 code snippets.
+Repeat runs load those embeddings from `prism-data` and only encode the 3,765
+queries. The encoder prints no progress bar, so after the line `Loaded 1
+prompt` the run stays quiet for a long time. That is normal, and `docker stats`
+shows it working. On a Mac the container runs inside a Linux virtual machine,
+which is part of why it is slower than the native venv.
+
+**Threads.** The container uses all the CPUs Docker gives it and prints the
+number when it starts (`prism: OMP_NUM_THREADS=8 ...`). On the test Mac, 8
+threads made a repeat run 12.5% faster than 4 (26.6 vs 30.4 min). To choose a
+number yourself, add `-e OMP_NUM_THREADS=N`. If you change
+`FAISS_INDEX_FACTORY` away from `"Flat"`, you must add `-e OMP_NUM_THREADS=1`,
+or the run crashes with exit code 139, because faiss and torch each load their
+own OpenMP runtime. See [`guide.md`](guide.md), section 3b.
 
 **It needs no network.** The model and dataset are baked in at build time by
 `scripts/prefetch_assets.py`, and the image then sets `HF_HUB_OFFLINE=1`,
-`TRANSFORMERS_OFFLINE=1` and `HF_DATASETS_OFFLINE=1`. You can prove it by
-removing the network entirely, which is what the gate does:
+`TRANSFORMERS_OFFLINE=1` and `HF_DATASETS_OFFLINE=1`. The `--network none` in
+step 2 proves it. The dataset id and revision are read from the MTEB task
+itself rather than hardcoded, so the bake cannot drift out of step with what
+`task.load_data()` requests at runtime.
 
-```bash
-docker run --rm --network none -v "$PWD/results:/app/results" prism-retrieval
-```
+**Verified in CI (linux/amd64).**
 
-The dataset id and revision are read from the MTEB task itself rather than
-hardcoded, so the bake cannot drift out of step with what `task.load_data()`
-requests at runtime.
-
-**Verified — on a clean machine, in CI, not on a developer laptop.** Be precise
-about this, because it is a graded claim:
-
-- The image has **never been built locally.** The dev machine has no Docker
-  daemon, which is also why the `Dockerfile` avoids comments inside its
-  backslash-continued `ENV` block — it could not be build-tested here.
-- It **has** been built and run end-to-end on a clean `ubuntu-latest` runner
-  from a `python:3.11-slim` base, by
+- Every push builds and runs the image on a clean `ubuntu-latest` runner from
+  a `python:3.11-slim` base, using
   [`.github/workflows/container-gate.yml`](.github/workflows/container-gate.yml).
   The gate builds with `--pull`, runs the offline asset check, runs
-  `pytest -m "not slow"` inside the container, executes the image's own `CMD`
-  on the **full test split with `--network none`**, and diffs the result
-  against the committed `appsretrieval_results.json`, failing on any mismatch.
+  `pytest -m "not slow"` inside the container, runs the image's own `CMD` on
+  the **full test split with `--network none`**, and compares the result with
+  the committed `appsretrieval_results.json`, failing on any difference. CI
+  uses the plain form `docker run --rm --network none -v
+  "$PWD/results:/app/results" prism-retrieval`, without the cache volumes.
 - **Latest green run:** [`35660647349`](https://github.com/DeshnaDey/SRMIST_NOVA/actions/runs/35660647349),
-  on commit `c49fb50`, 2026-09-21, 1h25m52s — every step passed including the
-  artifact diff. It reproduces NDCG@10 **0.08222** / MRR@10 **0.06799** /
-  recall@100 **0.30677** bit-for-bit.
+  on commit `c49fb50`, 2026-09-21, 1h25m52s for the whole job. Every step
+  passed, including the artifact comparison. It reproduces NDCG@10
+  **0.08222** / MRR@10 **0.06799** / recall@100 **0.30677** bit-for-bit.
 
 ---
 
@@ -601,11 +661,12 @@ too — they stop the next person retrying the same idea at 3am.
 - [x] **Full pipeline run committed** as `appsretrieval_results.json`
       (`pipeline: full`, split `test`, unlimited), round-tripped through
       `scripts/validate_results.py` with 6dp agreement against MTEB's own cache
-- [x] **`Dockerfile` built and run on a clean machine** — in CI on
-      `ubuntu-latest`, offline with `--network none`, reproducing the locked
-      artifact bit-for-bit (run
-      [`35660647349`](https://github.com/DeshnaDey/SRMIST_NOVA/actions/runs/35660647349)).
-      **Never built on the dev machine**, which has no Docker daemon
+- [x] **`Dockerfile` built and run on a clean machine**: in CI on
+      `ubuntu-latest` (linux/amd64), offline with `--network none`,
+      reproducing the locked artifact bit-for-bit (run
+      [`35660647349`](https://github.com/DeshnaDey/SRMIST_NOVA/actions/runs/35660647349)),
+      and on macOS Apple Silicon (linux/arm64) with Docker Desktop on
+      2026-09-28, also matching exactly
 - [ ] Tag the release:
 
 ```bash
