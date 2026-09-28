@@ -23,12 +23,16 @@ WORKDIR /app
 # PRISM_DATA_DIR - scratch for embeddings and the content-hash cache. Kept off
 #                  any synced directory: an iCloud-backed data dir cost this
 #                  project a 27 MB read that failed with [Errno 60] (guide.md).
-# OMP/MKL        - reproducible CPU timings, and load-bearing for correctness
-#                  if FAISS_INDEX_FACTORY is ever moved off "Flat": faiss-cpu
-#                  and torch each ship an OpenMP runtime and loading both
-#                  segfaults (exit 139). The default "Flat" path uses an exact
-#                  numpy index and never imports faiss, so this is
-#                  belt-and-braces rather than the fix.
+# OMP/MKL        - 4 is only the value used while the image BUILDS. At run
+#                  time the ENTRYPOINT at the bottom replaces it with the
+#                  number of CPUs the container actually has, unless you pass
+#                  your own (-e OMP_NUM_THREADS=N). faiss: the default
+#                  FAISS_INDEX_FACTORY="Flat" uses an exact numpy index and
+#                  never imports faiss. Any other factory does, and faiss-cpu
+#                  and torch each ship an OpenMP runtime; loading both
+#                  segfaults (exit 139) unless OMP_NUM_THREADS=1. So anyone
+#                  switching to a faiss index must run with
+#                  -e OMP_NUM_THREADS=1 (guide.md, section 3b).
 #
 # NOTE: no comments inside the ENV continuation below. A `#` line in the
 # middle of a backslash-continued instruction is not portable across
@@ -108,6 +112,21 @@ RUN python scripts/prefetch_assets.py --verify
 ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     HF_DATASETS_OFFLINE=1
+
+# THREADS. Use every CPU the container has instead of a fixed count. The ENV
+# near the top set 4 for the build; an ENV cannot be unset, only emptied, so
+# it is emptied here and the entrypoint fills in $(nproc) at run time. An
+# explicit -e OMP_NUM_THREADS=N or -e MKL_NUM_THREADS=N still wins, which is
+# how a faiss index gets the OMP_NUM_THREADS=1 it needs (guide.md, section
+# 3b). The entrypoint prints the values it chose to stderr, so every run log
+# records its thread count, then execs the command unchanged: the CMD below,
+# "docker run ... python ..." and "docker run -it ... bash" behave as before.
+#
+# These lines sit AFTER the dependency and prefetch layers on purpose, so
+# changing them does not invalidate the ~1 GB of cached downloads above.
+ENV OMP_NUM_THREADS= \
+    MKL_NUM_THREADS=
+ENTRYPOINT ["/bin/sh", "-c", "n=$(nproc); export OMP_NUM_THREADS=\"${OMP_NUM_THREADS:-$n}\" MKL_NUM_THREADS=\"${MKL_NUM_THREADS:-$n}\"; echo \"prism: OMP_NUM_THREADS=$OMP_NUM_THREADS MKL_NUM_THREADS=$MKL_NUM_THREADS\" >&2; exec \"$@\"", "--"]
 
 # The SUBMISSION run: the full pipeline, the full test split, written into the
 # mounted volume. Previously this was "--pipeline baseline", which regenerated
