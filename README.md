@@ -244,6 +244,37 @@ Don't bump anything without re-running the verification block above and
 
 ---
 
+## Try it
+
+Type a question, get the top 5 matching code snippets back. `scripts/search.py`
+runs the same pipeline `run_eval.py` scores and reads the corpus vectors from
+the embedding cache, so a warm start takes seconds and each question well
+under a second. With an empty cache, the first start builds it once (about
+10–15 min on a laptop CPU, longer in Docker).
+
+```bash
+python scripts/search.py
+```
+
+```bash
+docker run --rm -it --network none -v prism-data:/app/data prism-retrieval python scripts/search.py
+```
+
+The Docker form needs an image built after this script was added (`docker
+build -t prism-retrieval .`), and uses the embeddings the evaluation run left
+in the `prism-data` volume.
+
+Ask one question with `--query "..."` (and `--k N` for more results), or run a
+real test question with `--from-test N` (1–3765), which also tells you where
+the correct snippet ranked.
+
+Good questions are competitive-programming style problem descriptions ("Given
+an array of n integers, find the length of the longest strictly increasing
+subsequence..."). The corpus is Python solutions to those problems, so short
+keyword queries like "sort a dict" match poorly.
+
+---
+
 ## Running the evaluation
 
 **The submission run.** `--pipeline` defaults to `full` and `--split` to
