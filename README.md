@@ -19,6 +19,18 @@ corpus of code snippets, rank the snippets by relevance.
 - **Team:** `SRMIST_NOVA` (CollegeName_TeamName)
 - **Release tag:** `PRISM_GENAI_HACKATHON_Y2026` _(see [Submission](#submission))_
 
+### Submission materials
+
+| | |
+|---|---|
+| **Demo video** (3 min, command line) | [`docs/demo.mp4`](docs/demo.mp4): real runs of `scripts/search.py` in Docker with `--network none` |
+| **Presentation** | [`docs/SRMIST_NOVA_Submission.pptx`](docs/SRMIST_NOVA_Submission.pptx): the demo video is embedded in the "Demo & Product Walkthrough" slide |
+| **AI disclosure** | [`AI_DISCLOSURE.md`](AI_DISCLOSURE.md) |
+| **Source code** | [`src/`](src), [`scripts/`](scripts), [`tests/`](tests) |
+| **Requirements** | [`requirements.txt`](requirements.txt) (pinned), [`requirements-dev.txt`](requirements-dev.txt) |
+| **Try it** | `python scripts/search.py`. See [Try it](#try-it) |
+| **APK / SDK** | Not applicable. This is a Python command-line and Docker project |
+
 ---
 
 ## Approach
@@ -698,9 +710,7 @@ too — they stop the next person retrying the same idea at 3am.
       [`35660647349`](https://github.com/DeshnaDey/SRMIST_NOVA/actions/runs/35660647349)),
       and on macOS Apple Silicon (linux/arm64) with Docker Desktop on
       2026-09-28, also matching exactly
-- [ ] Tag the release:
-
-```bash
-git tag -a PRISM_GENAI_HACKATHON_Y2026 -m "SRMIST_NOVA — Samsung PRISM GenAI Hackathon 2026 submission"
-git push origin PRISM_GENAI_HACKATHON_Y2026
-```
+- [x] **Demo video, presentation and AI disclosure** in the repo. See
+      [Submission materials](#submission-materials)
+- [x] **Release tagged** `PRISM_GENAI_HACKATHON_Y2026`, on the final
+      submission commit
