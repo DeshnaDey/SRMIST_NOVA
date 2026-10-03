@@ -26,6 +26,7 @@ corpus of code snippets, rank the snippets by relevance.
 | | |
 |---|---|
 | **Demo video** (3 min, command line) | [`docs/demo.mp4`](docs/demo.mp4): real runs of `scripts/search.py` in Docker with `--network none` |
+| **Demo video** (Google Drive) | [Drive link](https://drive.google.com/file/d/1dwvpAdCxUQ7KSRFGkZLFBwCH_hRSIOJQ/view?usp=sharing) |
 | **Presentation** | [`docs/SRMIST_NOVA_Submission.pptx`](docs/SRMIST_NOVA_Submission.pptx): the demo video is embedded in the "Demo & Product Walkthrough" slide |
 | **AI disclosure** | [`AI_DISCLOSURE.md`](AI_DISCLOSURE.md) |
 | **Source code** | [`src/`](src), [`scripts/`](scripts), [`tests/`](tests) |
